@@ -3,6 +3,7 @@
 
     import PyQDecoders
     import LDPCDecoders
+    using LDPCDecoders: BeliefPropagationDecoder
 
     include("test_ecc_base.jl")
 
@@ -47,12 +48,15 @@
 
         for c in codes
             for s in setups
-                for d in [c -> PyBeliefPropOSDecoder(c, maxiter=2)]
+                for d in [
+                        c -> PyBeliefPropOSDecoder(c, maxiter=2),
+                        c -> BeliefPropagationDecoder(get_parity_check_matrix(c), noise, 2)
+                    ]
                     nsamples = 10000
-                    if true
-                        @test_broken false # TODO these are too slow to test in CI
-                        continue
-                    end
+                    # if true
+                    #     @test_broken false # TODO these are too slow to test in CI
+                    #     continue
+                    # end
                     e = evaluate_decoder(d(c), s, nsamples)
                     # @show c
                     # @show s
