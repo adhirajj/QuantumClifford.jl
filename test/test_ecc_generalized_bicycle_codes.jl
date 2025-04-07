@@ -15,4 +15,3 @@
     @test code_n(generalized_bicycle_codes([0 ,  9, 28, 13], [0 ,  1, 21, 34], 36)) == 72
     @test code_k(generalized_bicycle_codes([0 ,  9, 28, 13], [0 ,  1,  3, 22], 36)) == 10
     end
-end

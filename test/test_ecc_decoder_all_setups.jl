@@ -3,7 +3,6 @@
 
     import PyQDecoders
     import LDPCDecoders
-    using LDPCDecoders: BeliefPropagationDecoder
 
     include("test_ecc_base.jl")
 
@@ -50,7 +49,7 @@
             for s in setups
                 for d in [
                         c -> PyBeliefPropOSDecoder(c, maxiter=2),
-                        c -> BeliefPropagationDecoder(get_parity_check_matrix(c), noise, 2)
+                        c -> BeliefPropDecoder(c)
                     ]
                     nsamples = 10000
                     # if true
