@@ -1,4 +1,6 @@
 """
+    SubsystemCodeTableau
+
 A tableau representation of the non-commutative canonical form of a set of Paulis,
 which is used in [`commutify`](@ref).
 
@@ -106,6 +108,8 @@ end
 @inline logicalzview(s::SubsystemCodeTableau) = Stabilizer(tab(s)[length(s.tab)-s.k+1:length(s.tab)])
 
 """
+$(TYPEDSIGNATURES)
+
 Return the full stabilizer group represented by the input generating set (a [`Stabilizer`](@ref)).
 
 The returned object is exponentially long.
@@ -140,6 +144,8 @@ end
 
 
 """
+$(TYPEDSIGNATURES)
+
 For a not-necessarily-minimal generating set,
 return the minimal generating set.
 
@@ -168,6 +174,8 @@ function minimal_generating_set(s::Stabilizer)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 For a not-necessarily commutative set of Paulis, return a generating set of the form
 ⟨A₁, A₂, ... Aₖ, Aₖ₊₁, ... Aₘ, B₁, B₂, ... Bₖ⟩ where pairs Aₖ, Bₖ anticommute and all other pairings commute. Based on [RevModPhys.87.307](@cite)
 
@@ -252,6 +260,8 @@ end
 canonicalize_noncomm(ps::Base.AbstractVecOrTuple{PauliOperator}) = canonicalize_noncomm(Tableau(ps))
 
 """
+$(TYPEDSIGNATURES)
+
 For a not-necessarily commutative set of Paulis S,
 computed S', the [non-commutative canonical form](@ref canonicalize_noncomm) of of S.
 For each pair Aₖ, Bₖ of anticommutative Paulis in S', add a qubit to each Pauli in the set:
@@ -287,6 +297,8 @@ function commutify(t)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 For a given set S of Paulis that does not necessarily represent a state,
 return a set of Paulis S' that represents a state.
 S' is a superset of [commutified](@ref commutify) S.
@@ -296,7 +308,7 @@ Based on [goodenough2024bipartiteentanglementnoisystabilizer](@cite)
 By deleting the qubits in the first output array from S', taking the [`normalizer`](@ref) of S', then
 deleting the qubits in the second returned array from the [`normalizer`](@ref) of S', S is reproduced.
 
-```jldoctest
+```jldoctest; filter = r"( [(]empty range[)])?\$"
 julia> matroid_parent(T"XX")[1]
 + X_X
 + XX_
@@ -317,6 +329,8 @@ function matroid_parent(t::Tableau)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Return the full Pauli group of a given length. Phases are ignored by default,
 but can be included by setting `phases=true`.
 
@@ -364,8 +378,8 @@ function pauligroup(n::Int; phases=false)
         for i in 2*4^n+1:3*4^n
             s[i+4^n] = -1 * s[i]
         end
-    end
-    if !phases
+        return s
+    else
         s = zero(Tableau, 4^n, n)
         paulis = ((false, false), (true, false), (false, true), (true, true))
         for (i, P) in enumerate(Iterators.product(Iterators.repeated(paulis, n)...))
@@ -373,11 +387,13 @@ function pauligroup(n::Int; phases=false)
                 s[i, j] = p
             end
         end
+        return s
     end
-    return s
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Return all Pauli operators with the same number of qubits as the given `Tableau` `t`
 that commute with all operators in `t`.
 
@@ -421,6 +437,8 @@ function normalizer(t::Tableau; phases=false)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 For a given set of Paulis (in the form of a `Tableau`), return the subset of Paulis that commute with all Paulis in set.
 
 ```jldoctest
@@ -450,6 +468,8 @@ function centralizer(t::Tableau)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Return the subset of Paulis in a Stabilizer that have identity operators on all qubits corresponding to
 the given subset, without the entries corresponding to subset. Based on [goodenough2024bipartiteentanglementnoisystabilizer](@cite)
 

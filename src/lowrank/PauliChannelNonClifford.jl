@@ -1,3 +1,26 @@
+module PauliChannelNonClifford
+using LinearAlgebra
+using DataStructures: DefaultDict
+using DocStringExtensions
+import ..QuantumClifford
+import ..QuantumClifford:
+    AbstractQCState, AbstractOperation, AbstractCliffordOperator, AbstractStabilizer,
+    PauliOperator, Stabilizer, MixedDestabilizer, Destabilizer,
+    apply!, nqubits, stabilizerview, destabilizerview, rank,
+    zero, comm, mul_right!, embed, tensor, ⊗, project!, ghz,
+    I, X, Z, expect
+
+export
+    GeneralizedStabilizer,
+    PauliChannel,
+    UnitaryPauliChannel,
+    AbstractPauliChannel,
+    pcT,
+    pcPhase,
+    pcRx,
+    invsparsity,
+    rowdecompose
+
 """
 $(TYPEDEF)
 
@@ -26,10 +49,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒮𝓉𝒶𝒷
 - X
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + _ | + Z
- 0.0-0.353553im | + Z | + _
- 0.853553+0.0im | + _ | + _
  0.146447+0.0im | + Z | + Z
+ 0.0-0.353553im | + Z | + _
+ 0.0+0.353553im | + _ | + Z
+ 0.853553+0.0im | + _ | + _
 ```
 
 See also: [`PauliChannel`](@ref)
@@ -50,16 +73,26 @@ GeneralizedStabilizer(s::GeneralizedStabilizer) = s
 Base.copy(sm::GeneralizedStabilizer) = GeneralizedStabilizer(copy(sm.stab),copy(sm.destabweights))
 Base.:(==)(sm₁::GeneralizedStabilizer, sm₂::GeneralizedStabilizer) = sm₁.stab==sm₂.stab && sm₁.destabweights==sm₂.destabweights
 
+function _sorted_show_entries(s::GeneralizedStabilizer)
+    entries = [begin
+        left = string(_stabmixdestab(s.stab, di))
+        right = string(_stabmixdestab(s.stab, dj))
+        (χ, left, right)
+    end for ((di,dj), χ) in s.destabweights]
+    sort!(entries; by=entry->(entry[2], entry[3]))
+    return entries
+end
+
 function Base.show(io::IO, s::GeneralizedStabilizer)
     println(io, "A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is")
     show(io,s.stab)
     println(io)
     print(io, "with ϕᵢⱼ | Pᵢ | Pⱼ:")
-    for ((di,dj), χ) in s.destabweights
+    for (χ, left, right) in _sorted_show_entries(s)
         println(io)
         print(io, " ")
         print(IOContext(io, :compact => true), χ)
-        print(io, " | ", string(_stabmixdestab(s.stab, di)), " | ", string(_stabmixdestab(s.stab, dj)))
+        print(io, " | ", left, " | ", right)
     end
 end
 
@@ -75,6 +108,8 @@ function _stabmixdestab(mixeddestab, d)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Apply a Clifford gate to a generalized stabilizer state, i.e. a weighted sum of stabilizer states.
 
 ```jldoctest
@@ -106,7 +141,7 @@ end
 
 """$(TYPEDSIGNATURES)
 
-Expectation value for the [PauliOperator](@ref) observable given the [`GeneralizedStabilizer`](@ref) state `s`.
+Expectation value for the [`PauliOperator`](@ref) observable given the [`GeneralizedStabilizer`](@ref) state `s`.
 
 ```jldoctest genstab
 julia> sm = GeneralizedStabilizer(S"-X")
@@ -125,10 +160,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒮𝓉𝒶𝒷
 - X
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + _ | + Z
- 0.0-0.353553im | + Z | + _
- 0.853553+0.0im | + _ | + _
  0.146447+0.0im | + Z | + Z
+ 0.0-0.353553im | + Z | + _
+ 0.0+0.353553im | + _ | + Z
+ 0.853553+0.0im | + _ | + _
 
 julia> χ′ = expect(P"-X", sm)
 0.7071067811865475 + 0.0im
@@ -138,7 +173,7 @@ julia> prob = (real(χ′)+1)/2
 ```
 
 """
-function expect(p::PauliOperator, s::GeneralizedStabilizer) # TODO optimize
+function QuantumClifford.expect(p::PauliOperator, s::GeneralizedStabilizer) # TODO optimize
     χ′ = zero(valtype(s.destabweights))
     phase, b, c = rowdecompose(p, s.stab)
     for ((dᵢ,dⱼ), χ) in s.destabweights
@@ -160,7 +195,10 @@ function _allthreesumtozero(a,b,c)
     true
 end
 
-"""Compute the trace of a [`GeneralizedStabilizer`](@ref) state.
+"""
+$(TYPEDSIGNATURES)
+
+Compute the trace of a [`GeneralizedStabilizer`](@ref) state.
 
 ```jldoctest trace
 julia> using QuantumClifford; using LinearAlgebra;
@@ -174,10 +212,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒮𝓉𝒶𝒷
 - X
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + _ | + Z
- 0.0-0.353553im | + Z | + _
- 0.853553+0.0im | + _ | + _
  0.146447+0.0im | + Z | + Z
+ 0.0-0.353553im | + Z | + _
+ 0.0+0.353553im | + _ | + Z
+ 0.853553+0.0im | + _ | + _
 
 julia> tr(sm)
 1.0 + 0.0im
@@ -188,9 +226,13 @@ function LinearAlgebra.tr(sm::GeneralizedStabilizer)
     return trace_χ′
 end
 
-"""Returns the updated `GeneralizedStabilizer` state sm′ = (χ′, B(S′, D′)),
-where (S′, D′) is derived from (S, D) through the traditional stabilizer update,
-and χ′ is the updated density matrix after measurement. Note: Λ(χ′) ≤ Λ(χ).
+"""
+$(TYPEDSIGNATURES)
+
+Update a `GeneralizedStabilizer` after measurement without normalization.
+
+The result is sm′ = (χ′, B(S′, D′)), where (S′, D′) is derived from (S, D)
+through the traditional stabilizer update. Note: Λ(χ′) ≤ Λ(χ).
 """
 function _projectrand_notnorm(sm::GeneralizedStabilizer, p::PauliOperator, res::Int)
     dict = sm.destabweights
@@ -266,7 +308,7 @@ end
 """$(TYPEDSIGNATURES)
 
 Performs a randomized projection of the state represented by the [`GeneralizedStabilizer`](@ref) `sm`,
-based on the measurement of a [PauliOperator](@ref) `p`.
+based on the measurement of a [`PauliOperator`](@ref) `p`.
 
 Unlike in the case of stabilizer states, the expectation value χ′ of a Pauli operator
 with respect to these more general states can be any real number between -1 and 1.
@@ -297,10 +339,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒮𝓉𝒶𝒷
 - X
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + _ | + Z
- 0.0-0.353553im | + Z | + _
- 0.853553+0.0im | + _ | + _
  0.146447+0.0im | + Z | + Z
+ 0.0-0.353553im | + Z | + _
+ 0.0+0.353553im | + _ | + Z
+ 0.853553+0.0im | + _ | + _
 
 julia> χ′ = expect(P"-X", sm)
 0.7071067811865475 + 0.0im
@@ -308,7 +350,7 @@ julia> χ′ = expect(P"-X", sm)
 julia> prob₁ = (real(χ′)+1)/2
 0.8535533905932737
 
-julia> QuantumClifford._projectrand_notnorm(copy(sm), P"X", 0)[1]
+julia> QuantumClifford.PauliChannelNonClifford._projectrand_notnorm(copy(sm), P"X", 0)[1]
 A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒟ℯ𝓈𝓉𝒶𝒷
 + Z
@@ -317,7 +359,7 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 with ϕᵢⱼ | Pᵢ | Pⱼ:
  0.146447+0.0im | + Z | + Z
 
-julia> QuantumClifford._projectrand_notnorm(copy(sm), P"X", 1)[1]
+julia> QuantumClifford.PauliChannelNonClifford._projectrand_notnorm(copy(sm), P"X", 1)[1]
 A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒟ℯ𝓈𝓉𝒶𝒷
 + Z
@@ -329,7 +371,7 @@ with ϕᵢⱼ | Pᵢ | Pⱼ:
 
 See also: [`expect`](@ref)
 """
-function projectrand!(sm::GeneralizedStabilizer, p::PauliOperator)
+function QuantumClifford.projectrand!(sm::GeneralizedStabilizer, p::PauliOperator)
     # Compute expectation value
     exp_val = expect(p, sm)
     prob_plus = (real(exp_val) + 1) / 2
@@ -354,7 +396,10 @@ nqubits(sm::GeneralizedStabilizer) = nqubits(sm.stab)
 
 abstract type AbstractPauliChannel <: AbstractOperation end
 
-"""A Pauli channel datastructure, mainly for use with [`GeneralizedStabilizer`](@ref)
+"""
+$(TYPEDEF)
+
+A Pauli channel datastructure, mainly for use with [`GeneralizedStabilizer`](@ref)
 
 See also: [`UnitaryPauliChannel`](@ref)"""
 struct PauliChannel{T,S} <: AbstractPauliChannel
@@ -396,7 +441,10 @@ end
 
 nqubits(pc::PauliChannel) = nqubits(pc.paulis[1][1])
 
-"""Applies a (potentially non-unitary) Pauli channel to a generalized stabilizer.
+"""
+$(TYPEDSIGNATURES)
+
+Applies a (potentially non-unitary) Pauli channel to a generalized stabilizer.
 
 See also: [`GeneralizedStabilizer`](@ref), [`PauliChannel`](@ref), [`UnitaryPauliChannel`](@ref)
 """
@@ -413,10 +461,10 @@ function apply!(state::GeneralizedStabilizer, gate::AbstractPauliChannel; prune_
             w = gate.weights[i]
             phaseₗ, dₗ, dₗˢᵗᵃᵇ = rowdecompose(Pₗ,stab)
             phaseᵣ, dᵣ, dᵣˢᵗᵃᵇ = rowdecompose(Pᵣ,stab)
-            c = (dot(dₗˢᵗᵃᵇ,dᵢ) + dot(dᵣˢᵗᵃᵇ,dⱼ))*2
+            c = (dot(dₗˢᵗᵃᵇ,dᵢ) + dot(dᵣˢᵗᵃᵇ,dⱼ)) # algorithm 3 (Eq. 29), see https://scottaaronson.com/showcase2/report/ted-yoder.pdf
             dᵢ′ = dₗ .⊻ dᵢ
             dⱼ′ = dᵣ .⊻ dⱼ
-            χ′ = χ * w * (-tone)^c * (im)^(-phaseₗ+phaseᵣ+4)
+            χ′ = χ * w * (-tone)^c * (im)^(phaseₗ-phaseᵣ+4) # Pauli operator M can be decomposed as α*d_b*s_c -- here algorithm 3 utilizes α_l*α† == i^(phase_l-phase_r+4) because (i^phase)† == i^(-phase).
             newdict[(dᵢ′,dⱼ′)] += χ′
         end
     end
@@ -479,10 +527,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 + XX
 + ZZ
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.853553+0.0im | + __ | + __
- 0.0+0.353553im | + __ | + Z_
- 0.0-0.353553im | + Z_ | + __
  0.146447+0.0im | + Z_ | + Z_
+ 0.0-0.353553im | + Z_ | + __
+ 0.0+0.353553im | + __ | + Z_
+ 0.853553+0.0im | + __ | + __
 
 julia> newsm = sm ⊗ sm
 A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
@@ -497,22 +545,22 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 + __XX
 + __ZZ
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0-0.301777im | + Z___ | + ____
- -0.125+0.0im | + Z_Z_ | + ____
- 0.125+0.0im | + Z___ | + Z___
- 0.728553+0.0im | + ____ | + ____
- 0.0-0.0517767im | + Z_Z_ | + Z___
- 0.0-0.301777im | + __Z_ | + ____
- 0.0+0.301777im | + ____ | + Z___
- 0.125+0.0im | + __Z_ | + Z___
- 0.125+0.0im | + Z___ | + __Z_
- 0.0-0.0517767im | + Z_Z_ | + __Z_
- 0.0+0.0517767im | + Z___ | + Z_Z_
- 0.0+0.301777im | + ____ | + __Z_
  0.0214466+0.0im | + Z_Z_ | + Z_Z_
- 0.125+0.0im | + __Z_ | + __Z_
- -0.125+0.0im | + ____ | + Z_Z_
+ 0.0-0.0517767im | + Z_Z_ | + Z___
+ 0.0-0.0517767im | + Z_Z_ | + __Z_
+ -0.125+0.0im | + Z_Z_ | + ____
+ 0.0+0.0517767im | + Z___ | + Z_Z_
+ 0.125+0.0im | + Z___ | + Z___
+ 0.125+0.0im | + Z___ | + __Z_
+ 0.0-0.301777im | + Z___ | + ____
  0.0+0.0517767im | + __Z_ | + Z_Z_
+ 0.125+0.0im | + __Z_ | + Z___
+ 0.125+0.0im | + __Z_ | + __Z_
+ 0.0-0.301777im | + __Z_ | + ____
+ -0.125+0.0im | + ____ | + Z_Z_
+ 0.0+0.301777im | + ____ | + Z___
+ 0.0+0.301777im | + ____ | + __Z_
+ 0.728553+0.0im | + ____ | + ____
 
 julia> real(tr(newsm))
 1.0
@@ -540,7 +588,10 @@ function (⊗)(state₁::GeneralizedStabilizer, state₂::GeneralizedStabilizer)
     return GeneralizedStabilizer(newstab, newdict)
 end
 
-"""Tensor product between [`GeneralizedStabilizer`](@ref) and [`Stabilizer`](@ref).
+"""
+$(TYPEDSIGNATURES)
+
+Tensor product between [`GeneralizedStabilizer`](@ref) and [`Stabilizer`](@ref).
 
 ```jldoctest
 julia> using LinearAlgebra; # hide
@@ -565,10 +616,10 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 + XX
 + ZZ
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.853553+0.0im | + __ | + __
- 0.0+0.353553im | + __ | + Z_
- 0.0-0.353553im | + Z_ | + __
  0.146447+0.0im | + Z_ | + Z_
+ 0.0-0.353553im | + Z_ | + __
+ 0.0+0.353553im | + __ | + Z_
+ 0.853553+0.0im | + __ | + __
 
 julia> s = ghz(2)
 + XX
@@ -587,18 +638,21 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 + __XX
 + __ZZ
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + ____ | + Z___
- 0.0-0.353553im | + Z___ | + ____
  0.146447+0.0im | + Z___ | + Z___
+ 0.0-0.353553im | + Z___ | + ____
+ 0.0+0.353553im | + ____ | + Z___
  0.853553+0.0im | + ____ | + ____
 
 julia> real(tr(newsm))
 1.0
 ```
 """
-tensor(ops::Union{AbstractStabilizer,GeneralizedStabilizer}...) = tensor(GeneralizedStabilizer.(ops)...)
+tensor(op::Union{AbstractStabilizer,GeneralizedStabilizer}, ops::Union{AbstractStabilizer,GeneralizedStabilizer}...) = tensor(GeneralizedStabilizer.((op, ops...))...)
 
-"""Decompose a Pauli ``P`` in terms of stabilizer and destabilizer rows from a given tableaux.
+"""
+$(TYPEDSIGNATURES)
+
+Decompose a Pauli ``P`` in terms of stabilizer and destabilizer rows from a given tableaux.
 
 For given tableaux of rows destabilizer rows ``\\{d_i\\}`` and stabilizer rows ``\\{s_i\\}``,
 there are boolean vectors ``b`` and ``c`` such that
@@ -645,7 +699,10 @@ function rowdecompose(pauli,state::Union{MixedDestabilizer, Destabilizer})
     return p+pauli.phase[], b, c
 end
 
-"""A Pauli channel datastructure, mainly for use with [`GeneralizedStabilizer`](@ref).
+"""
+$(TYPEDEF)
+
+A Pauli channel datastructure, mainly for use with [`GeneralizedStabilizer`](@ref).
 
 More convenient to use than [`PauliChannel`](@ref) when you know your Pauli channel is unitary.
 
@@ -707,13 +764,16 @@ nqubits(pc::UnitaryPauliChannel) = nqubits(pc.paulis[1])
 
 apply!(state::GeneralizedStabilizer, gate::UnitaryPauliChannel; prune_threshold=1e-10) = apply!(state, gate.paulichannel; prune_threshold)
 
-function tensor(pcs::UnitaryPauliChannel...)
+function tensor(pc::UnitaryPauliChannel, pcs::UnitaryPauliChannel...)
+    pcs = (pc, pcs...)
     newpaulis = [tensor(ps...) for ps in Iterators.product([pc.paulis for pc in pcs]...)]
     newweights = [prod(ws) for ws in Iterators.product([pc.weights for pc in pcs]...)]
     return UnitaryPauliChannel(newpaulis, newweights)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Tensor product between [`UnitaryPauliChannel`](@ref) and [`PauliOperator`](@ref).
 
 ```jldoctest
@@ -732,7 +792,9 @@ with ϕᵢ | Pᵢ
  -0.103553-0.103553im | + ZZX
 ```
 """
-tensor(pcs::Union{UnitaryPauliChannel,PauliOperator}...) = tensor(UnitaryPauliChannel.(pcs)...)
+tensor(pc::Union{UnitaryPauliChannel,PauliOperator}, pcs::Union{UnitaryPauliChannel,PauliOperator}...) = tensor(UnitaryPauliChannel.((pc, pcs...))...)
+# This also matches calls containing only PauliOperators and no channels, so the
+# more-specific PauliOperator vararg method must take priority to avoid recursion.
 
 """
 Apply a [`UnitaryPauliChannel`](@ref) to a [`GeneralizedStabilizer`](@ref) state.
@@ -754,15 +816,17 @@ A mixture ∑ ϕᵢⱼ Pᵢ ρ Pⱼ† where ρ is
 𝒮𝓉𝒶𝒷
 - X
 with ϕᵢⱼ | Pᵢ | Pⱼ:
- 0.0+0.353553im | + _ | + Z
- 0.0-0.353553im | + Z | + _
- 0.853553+0.0im | + _ | + _
  0.146447+0.0im | + Z | + Z
+ 0.0-0.353553im | + Z | + _
+ 0.0+0.353553im | + _ | + Z
+ 0.853553+0.0im | + _ | + _
 ```
 """
 Base.:(*)(pc::UnitaryPauliChannel, sm::GeneralizedStabilizer) = apply!(sm, pc.paulichannel)
 
 """
+    invsparsity(state_or_channel)
+
 Calculates the number of non-zero elements in the density matrix `χ`
 of a [`GeneralizedStabilizer`](@ref), representing the inverse sparsity
 of `χ`. It provides a measure of the state's complexity, with bounds
@@ -804,6 +868,10 @@ invsparsity(gate::AbstractPauliChannel) = count(!iszero, values(gate.paulichanne
 # Predefined Pauli Channels
 ##
 
+"""Phase rotation gate `Rz(ϕ) = diag(1, e^(iϕ))` as a [`UnitaryPauliChannel`](@ref), for use with [`GeneralizedStabilizer`](@ref).
+
+See also: [`pcT`](@ref), [`pcRx`](@ref)
+"""
 function pcPhase(ϕ)
     UnitaryPauliChannel(
         (I, Z),
@@ -811,4 +879,23 @@ function pcPhase(ϕ)
     )
 end
 
+"""
+    pcT
+
+The T gate (`Rz(π/4)`) as a [`UnitaryPauliChannel`](@ref), for use with [`GeneralizedStabilizer`](@ref). Equivalent to `pcPhase(π/4)`.
+
+See also: [`pcPhase`](@ref), [`pcRx`](@ref)
+"""
 const pcT = pcPhase(π/4)
+
+"""X rotation gate `Rx(θ)` as a [`UnitaryPauliChannel`](@ref), for use with [`GeneralizedStabilizer`](@ref).
+
+See also: [`pcPhase`](@ref), [`pcT`](@ref)
+"""
+function pcRx(θ)
+    UnitaryPauliChannel(
+        (I, X),
+        (cos(θ/2), -im*sin(θ/2))
+    )
+end
+end

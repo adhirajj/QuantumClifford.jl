@@ -2,8 +2,8 @@ module ECC
 
 using QECCore
 import QECCore: code_n, code_s, code_k, rate, distance, parity_matrix_x, parity_matrix_z, parity_matrix,
-metacheck_matrix_x, metacheck_matrix_z, metacheck_matrix, hgp, generator_polynomial
-using LinearAlgebra: LinearAlgebra, I, rank, tr
+    metacheck_matrix_x, metacheck_matrix_z, metacheck_matrix, hgp, generator_polynomial, hasmetachecks,
+    AbstractPolynomialCode
 using QuantumClifford: QuantumClifford, AbstractOperation, AbstractStabilizer,
     AbstractTwoQubitOperator, Stabilizer, PauliOperator,
     random_brickwork_clifford_circuit, random_all_to_all_clifford_circuit,
@@ -13,13 +13,16 @@ using QuantumClifford: QuantumClifford, AbstractOperation, AbstractStabilizer,
     sZCX, sZCY, sZCZ, sXCX, sXCY, sXCZ, sYCX, sYCY, sYCZ, sZ, sX, sY, sMRZ, sMRX,
     single_x, single_y, single_z, random_pauli!, PauliError,
     apply!, comm, comm!, stab_to_gf2, embed, @S_str, affectedqubits, affectedbits,
-    pftrajectories, pfmeasurements, mctrajectories
+    pftrajectories, measurements, mctrajectories
 import QuantumClifford: Stabilizer, MixedDestabilizer, nqubits
-using DocStringExtensions
+
 using Combinatorics: combinations
+using LinearAlgebra: LinearAlgebra, I, rank, tr
+using Nemo: ZZ, residue_ring, matrix, finite_field, GF, minpoly, coeff, lcm, FqPolyRingElem, FqFieldElem, is_zero, degree, defining_polynomial, is_irreducible, echelon_form
 using SparseArrays: sparse
 using Statistics: std
-using Nemo: ZZ, residue_ring, matrix, finite_field, GF, minpoly, coeff, lcm, FqPolyRingElem, FqFieldElem, is_zero, degree, defining_polynomial, is_irreducible, echelon_form
+
+using DocStringExtensions
 
 export parity_checks, parity_matrix_x, parity_matrix_z, iscss,
     code_n, code_s, code_k, rate, distance, DistanceMIPAlgorithm,
@@ -30,30 +33,37 @@ export parity_checks, parity_matrix_x, parity_matrix_z, iscss,
     CSS,
     Shor9, Steane7, Cleve8, Perfect5, Bitflip3,
     Toric, Gottesman, Surface, Concat, CircuitCode,
-    LPCode, two_block_group_algebra_codes, generalized_bicycle_codes, bicycle_codes,
-    haah_cubic_codes, twobga_from_fp_group, twobga_from_direct_product,
+    LPCode, two_block_group_algebra_code, generalized_bicycle_code_as_2bga, bicycle_code_as_2bga,
+    Haah_cubic_code_as_2bga, twobga_from_fp_group, twobga_from_direct_product,
     TillichZemor, random_TillichZemor_code,
     random_brickwork_circuit_code, random_all_to_all_circuit_code,
-    Triangular488, Triangular666, honeycomb_color_codes, DelfosseReichardt,
-    DelfosseReichardtRepCode, DelfosseReichardt823, LaCross,
+    Triangular488, Triangular666, honeycomb_color_code_as_2bga, DelfosseReichardt,
+    DelfosseReichardtRep, DelfosseReichardt823, LaCross,
     QuantumTannerGraphProduct, CyclicQuantumTannerGraphProduct,
-    DDimensionalSurfaceCode, DDimensionalToricCode, boundary_maps,
-    GeneralizedCirculantBivariateBicycle, GeneralizedHyperGraphProductCode,
-    GeneralizedBicycleCode, ExtendedGeneralizedBicycleCode,
-    HomologicalProductCode, DoubleHomologicalProductCode,
-    GeneralizedToricCode, TrivariateTricycleCode,
+    DDimensionalSurface, DDimensionalToric, boundary_maps,
+    BivariateBicycleViaCirculantMat, GeneralizedHyperGraphProduct,
+    GeneralizedBicycle, ExtendedGeneralizedBicycle,
+    HomologicalProduct, DoubleHomologicalProduct,
+    GeneralizedToric, TrivariateTricycle, BivariateBicycleViaPoly,
+    MultivariateMulticycle,
     evaluate_decoder,
     CommutationCheckECCSetup, NaiveSyndromeECCSetup, ShorSyndromeECCSetup,
-    TableDecoder,
-    BeliefPropDecoder, BitFlipDecoder, BPOTSDecoder,
-    PyBeliefPropDecoder, PyBeliefPropOSDecoder, PyMatchingDecoder, DecoderCorrectionGate
+    TableDecoder, CSSTableDecoder,
+    BeliefPropDecoder, BitFlipDecoder, BPOTSDecoder
+    PyBeliefPropDecoder, PyBeliefPropOSDecoder, PyMatchingDecoder, TesseractDecoder, DecoderCorrectionGate
 
-"""Parity check tableau of a code.
+"""
+    parity_checks
+
+Parity check tableau of a code.
 
 See also: [`parity_matrix_x`](@ref) and [`parity_matrix_z`](@ref)"""
 function parity_checks end
 
-"""Parity check boolean matrix of a code (only the X entries in the tableau, i.e. the checks for Z errors).
+"""
+    parity_matrix_x(::AbstractECC)
+
+Parity check boolean matrix of a code (only the X entries in the tableau, i.e. the checks for Z errors).
 
 Only CSS codes have this method.
 
@@ -62,7 +72,10 @@ function parity_matrix_x(code::AbstractECC)
     throw(lazy"Codes of type $(typeof(code)) do not have separate X and Z parity checks, either because they are not a CSS code and thus inherently do not have separate checks, or because its separate checks are not yet implemented in this library.")
 end
 
-"""Parity check boolean matrix of a code (only the Z entries in the tableau, i.e. the checks for X errors).
+"""
+    parity_matrix_z(::AbstractECC)
+
+Parity check boolean matrix of a code (only the Z entries in the tableau, i.e. the checks for X errors).
 
 Only CSS codes have this method.
 
@@ -105,6 +118,8 @@ code_s(s::Stabilizer) = length(s)
 code_s(c::AbstractECC) = code_s(parity_checks(c))
 
 """
+    code_k(::Stabilizer)
+
 The number of logical qubits in a code.
 
 Note that when redundant rows exist in the parity check matrix, the number of logical qubits `code_k(c)` will be greater than `code_n(c) - code_s(c)`, where the difference equals the redundancy.
@@ -165,7 +180,10 @@ function logz_ops(c)
     logicalzview(md)
 end
 
-"""Error-to-logical-observable map (a.k.a. fault matrix) of a code.
+"""
+    faults_matrix(::Stabilizer)
+
+Error-to-logical-observable map (a.k.a. fault matrix) of a code.
 
 For a code with n physical qubits and k logical qubits this function returns
 a 2k × 2n binary matrix O such that
@@ -353,7 +371,10 @@ function faults_matrix(c::AbstractECC)
 end
 
 """
-$TYPEDSIGNATURES
+    isdegenerate(::AbstractECC, errors)
+    isdegenerate(::AbstractStabilizer, errors)
+    isdegenerate(::Stabilizer, errors)
+    isdegenerate(::Stabilizer, d::Int=1)
 
 Check if the code is degenerate with respect to a given set of error or with respect to all
 "up to d physical-qubit" errors (defaulting to d=1).
@@ -398,14 +419,10 @@ include("codes/util.jl")
 
 include("codes/concat.jl")
 include("codes/random_circuit.jl")
-include("codes/classical/bch.jl")
 
 # qLDPC
 include("codes/classical/lifted.jl")
-include("codes/qeccs_using_hecke.jl")
-
-# higher dimensional codes
-include("codes/qeccs_using_oscar.jl")
+include("codes/qeccs_from_extensions.jl")
 
 include("decoder_correction_gate.jl")
 end #module

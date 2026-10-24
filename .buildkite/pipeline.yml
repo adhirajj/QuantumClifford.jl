@@ -1,109 +1,172 @@
 env:
-  CODECOV_TOKEN: adb3f22a-231a-4f7b-8ed4-7c6c56453cbe
   JULIA_NUM_THREADS: auto
-  PYTHON: ""
-  PYCALL_DEBUG_BUILD: yes
+
+secrets:
+  - CODECOV_TOKEN
 
 steps:
-  - label: "Package Tests - {{matrix.LABEL}}"
+  - label: "QuantumClifford - {{matrix.LABEL}} (local QECCore)"
     plugins:
-      - JuliaCI/julia#v1:
+      - QuantumSavory/julia#v1:
           version: "1"
-      - QuantumSavory/julia-xvfb#v1:
+          compiled_size_limit: 10737418240 # 10GiB
       - JuliaCI/julia-test#v1:
+          test_args: "{{matrix.TEST_ARGS}}"
       - JuliaCI/julia-coverage#v1:
-          codecov: true
-    command:
+          dirs:
+            - ./src
+            - ./ext
+            - ./lib/QECCore/src
+            - ./lib/QECCore/ext
+    commands:
       - echo "Julia depot path $${JULIA_DEPOT_PATH}"
-      - julia --project='~' -e '
-        using Pkg;
-        pkg"dev .";'
     env:
-      JET_TEST: "{{matrix.JET_TEST}}"
       QC_ECC_TEST: "{{matrix.QC_ECC_TEST}}"
       QC_GPU_TEST: "{{matrix.QC_GPU_TEST}}"
+      JULIA_NUM_THREADS: "{{matrix.THREADS}}"
     agents:
       queue: "{{matrix.QUEUE}}"
     matrix:
       setup:
-        LABEL: ["base tests"]
-        QUEUE: ["default"]
-        JET_TEST: ["false"]
+        LABEL: ["General"]
+        QUEUE: ["default-queue"]
+        TEST_ARGS: ["general"]
         QC_ECC_TEST: ["false"]
         QC_GPU_TEST: ["false"]
+        THREADS: ["auto"]
       adjustments:
         - with:
             LABEL: "JET"
-            QUEUE: default
-            JET_TEST: true
-            QC_ECC_TEST: false
-            QC_GPU_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "jet"
+            QC_ECC_TEST: "false"
+            QC_GPU_TEST: "false"
+            THREADS: "1" # Avoid concurrent JET compiler inference crashes.
         - with:
             LABEL: "ECC Base"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "base"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
             LABEL: "ECC Encoding"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "encoding"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
             LABEL: "ECC Decoding"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "decoding"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
             LABEL: "ECC Syndrome Measurement"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "syndromemeasurement"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
             LABEL: "ECC Syndrome Circuit"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "syndromecircuit"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
             LABEL: "ECC Bespoke"
-            QUEUE: default
-            JET_TEST: false
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
             QC_ECC_TEST: "bespoke"
-            QC_GPU_TEST: false
+            QC_GPU_TEST: "false"
+            THREADS: "auto"
         - with:
-            LABEL: "GPU - CUDA"
+            LABEL: "GPU CUDA"
             QUEUE: cuda
-            JET_TEST: false
-            QC_ECC_TEST: false
+            TEST_ARGS: "general"
+            QC_ECC_TEST: "false"
             QC_GPU_TEST: "cuda"
+            THREADS: "auto"
         - with:
-            LABEL: "GPU - ROCm"
+            LABEL: "GPU ROCm"
             QUEUE: rocm
-            JET_TEST: false
-            QC_ECC_TEST: false
+            TEST_ARGS: "general"
+            QC_ECC_TEST: "false"
             QC_GPU_TEST: "rocm"
+            THREADS: "auto"
         - with:
-            LABEL: "GPU - OpenCL"
-            QUEUE: default
-            JET_TEST: false
-            QC_ECC_TEST: false
+            LABEL: "GPU OpenCL"
+            QUEUE: "default-queue"
+            TEST_ARGS: "general"
+            QC_ECC_TEST: "false"
             QC_GPU_TEST: "opencl"
+            THREADS: "auto"
 
-  - label: "Downstream Tests - {{matrix.PACKAGE}}"
+  - label: "QECCore - {{matrix.LABEL}} (local QuantumClifford)"
     plugins:
-      - JuliaCI/julia#v1:
+      - QuantumSavory/julia#v1:
           version: "1"
-      - QuantumSavory/julia-xvfb#v1:
+          compiled_size_limit: 10737418240 # 10GiB
+      - JuliaCI/julia-test#v1:
+          package: "QECCore"
+          test_args: "{{matrix.TEST_ARGS}}"
+      - JuliaCI/julia-coverage#v1:
+          dirs:
+            - ./src
+            - ./ext
+            - ./lib/QECCore/src
+            - ./lib/QECCore/ext
+    commands:
+      - echo "Julia depot path $${JULIA_DEPOT_PATH}"
+    env:
+      JULIA_NUM_THREADS: "{{matrix.THREADS}}"
+    agents:
+      queue: "{{matrix.QUEUE}}"
+    matrix:
+      setup:
+        LABEL: ["General"]
+        QUEUE: ["default-queue"]
+        TEST_ARGS: ["general"]
+        THREADS: ["auto"]
+      adjustments:
+        - with:
+            LABEL: "JET"
+            QUEUE: "default-queue"
+            TEST_ARGS: "jet"
+            THREADS: "1" # Avoid concurrent JET compiler inference crashes.
+
+  - label: "Downstream {{matrix.PACKAGE}}"
+    plugins:
+      - QuantumSavory/julia#v1:
+          version: "1"
+          compiled_size_limit: 10737418240 # 10GiB
     command:
       - echo "Julia depot path $${JULIA_DEPOT_PATH}"
       - julia --project=$(mktemp -d) -e '
         using Pkg;
         pkg"dev .";
         Pkg.add("{{matrix.PACKAGE}}");
+        Pkg.build("{{matrix.PACKAGE}}");
+        Pkg.test("{{matrix.PACKAGE}}");'
+    matrix:
+      setup:
+        PACKAGE: ["QuantumSavory", "BPGates", "QuantumSymbolics"]
+
+  - label: "Downstream (dev) {{matrix.PACKAGE}}"
+    plugins:
+      - QuantumSavory/julia#v1:
+          version: "1"
+          compiled_size_limit: 10737418240 # 10GiB
+    command:
+      - echo "Julia depot path $${JULIA_DEPOT_PATH}"
+      - julia --project=$(mktemp -d) -e '
+        using Pkg;
+        pkg"dev .";
+        Pkg.develop("{{matrix.PACKAGE}}");
         Pkg.build("{{matrix.PACKAGE}}");
         Pkg.test("{{matrix.PACKAGE}}");'
     matrix:

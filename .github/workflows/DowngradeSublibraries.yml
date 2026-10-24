@@ -1,0 +1,45 @@
+name: Downgrade Sublibraries
+on:
+  pull_request:
+    branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+  push:
+    branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  QUANTUMSAVORY_DOWNGRADE_TEST: "true"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v3
+        with:
+          delete-old-caches: false
+      - uses: julia-actions/julia-downgrade-compat@v2.7.0
+        with:
+          projects: 'lib/QECCore,lib/QECCore/test'
+          skip: LinearAlgebra,Random,SparseArrays
+          mode: 'forcedeps'
+      - uses: julia-actions/julia-buildpkg@v1
+        with:
+          project: 'lib/QECCore'
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          project: 'lib/QECCore'
+          allow_reresolve: false
+          force_latest_compatible_version: false

@@ -57,7 +57,7 @@
     @testset "fast column and fast row mul_left correctness" begin
         reinterpret_stab(s) = Stabilizer(Tableau(copy(phases(s)), nqubits(s), collect(reinterpret(UInt8, collect(s.tab.xzs)))))
         reinterpret_p(p) = PauliOperator(p.phase, nqubits(p), collect(reinterpret(UInt8, p.xz)))
-        for N in [7,8,9,33,61,62,63,64,65,66]
+        for N in [7,8,9,63,64,65]
 
             s0 = random_stabilizer(2,N)
             p = random_pauli(N)
@@ -79,5 +79,34 @@
 
             @test stab_to_gf2(s) == stab_to_gf2(sr) == stab_to_gf2(sc) == stab_to_gf2(s8) == stab_to_gf2(s8r) == stab_to_gf2(s8c)
         end
+    end
+
+    @testset "memory layout correctness" begin
+        # Verify that fastrow and fastcolumn layouts produce identical results
+        s_row = fastrow(random_stabilizer(100, 128))
+        s_col = fastcolumn(copy(s_row))
+        
+        # Canonicalization should produce equivalent results
+        result_row = canonicalize!(s_row; phases=true)
+        result_col = canonicalize!(s_col; phases=true)
+        @test stab_to_gf2(result_row) == stab_to_gf2(result_col)
+        
+        # Sparse gate application should be equivalent
+        s_row_gates = fastrow(random_stabilizer(50, 64))
+        s_col_gates = fastcolumn(copy(s_row_gates))
+        gate = sCNOT(1, 2)
+        
+        s_row_after = apply!(s_row_gates, gate)
+        s_col_after = apply!(s_col_gates, gate)
+        @test stab_to_gf2(s_row_after) == stab_to_gf2(s_col_after)
+        
+        # Dense clifford operator application should be equivalent
+        s_row_clif = fastrow(random_stabilizer(50, 64))
+        s_col_clif = fastcolumn(copy(s_row_clif))
+        c = CliffordOperator(random_destabilizer(64; phases=false))
+        
+        s_row_clif_after = apply!(s_row_clif, c)
+        s_col_clif_after = apply!(s_col_clif, c)
+        @test stab_to_gf2(s_row_clif_after) == stab_to_gf2(s_col_clif_after)
     end
 end

@@ -14,19 +14,47 @@ end
 
 # Implementations for Register
 function applynoise!(r::Register, n, i::Int)
-    apply!(quantumstate(r), n, i)
+    applynoise!(quantumstate(r), n, i)
     return r
 end
 function applynoise!(r::Register, n, indices::Base.AbstractVecOrTuple)
-    apply!(quantumstate(r), n, indices)
+    applynoise!(quantumstate(r), n, indices)
     return r
 end
 
-"""Depolarization noise model with total probability of error `p`."""
+"""
+$TYPEDEF
+
+Depolarization noise model with total probability of error `p`.
+"""
 struct UnbiasedUncorrelatedNoise{T} <: AbstractNoise
     p::T
 end
 UnbiasedUncorrelatedNoise(p::Integer) = UnbiasedUncorrelatedNoise(float(p))
+
+"""
+Depolarization noise model with depolarization probability `p`.
+
+On `n` qubits this applies the channel
+`E(rho) = (1-p)rho + p/4^n * sum(P*rho*P)` (where the sum is over all `n`-qubit Pauli operators P, including the identity),
+which is equivalent to `E(rho) = (1-p)rho + p/2^n * Id`, where the second term corresponds to a complete mixed state.
+
+With this parameterization,
+the total probability of error is `p * (1 - 1/4^n)`,
+because the sum over Paulis includes a `1/4^n` chance of sampling the identity.
+
+For the common two-qubit error-probability parameterization, use
+`DepolarizationNoise(; two_qubit_error_probability=e)`. This constructs the equivalent
+depolarization probability so that the identity occurs with probability `1-e`
+and each of the 15 non-identity two-qubit Pauli errors occurs with probability
+`e/15`. Be careful if you use this constructor, as it will use the same computed
+depolarization probability for all noise operations (two-qubit or not).
+"""
+struct DepolarizationNoise{T} <: AbstractNoise
+    p::T
+end
+DepolarizationNoise(p::Integer) = DepolarizationNoise(float(p))
+DepolarizationNoise(; two_qubit_error_probability) = DepolarizationNoise(two_qubit_error_probability * 16 / 15)
 
 """Pauli noise model with probabilities `px`, `py`, and `pz` respectively for the three types of Pauli errors."""
 struct PauliNoise{T} <: AbstractNoise
@@ -72,7 +100,46 @@ function applynoise!(s::AbstractStabilizer,noise::PauliNoise,i::Int)
     s
 end
 
-"""An operator that applies the given `noise` model to the qubits at the selected `indices`."""
+@inline function _apply_pauli_digit!(s::AbstractStabilizer, q::Int, digit::Int)
+    if digit == 0
+        return s
+    elseif digit == 1
+        apply_single_x!(s, q)
+    elseif digit == 2
+        apply_single_z!(s, q)
+    elseif digit == 3
+        apply_single_y!(s, q)
+    #else # to make it easy for the compiler to figure out that this will not throw in actual use
+    #    throw(ArgumentError("invalid Pauli digit $digit"))
+    end
+    return s
+end
+
+function _apply_depolarization_pauli!(s::AbstractStabilizer, indices::Base.AbstractVecOrTuple, pauli_idx::Int)
+    for i in indices
+        pauli_idx, digit = divrem(pauli_idx, 4)
+        _apply_pauli_digit!(s, i, digit)
+    end
+    return s
+end
+
+function applynoise!(s::AbstractStabilizer, noise::DepolarizationNoise, indices::Base.AbstractVecOrTuple)
+    if rand() >= noise.p
+        return s
+    end
+
+    pauli_idx = rand(0:4^(length(indices))-1)
+    return _apply_depolarization_pauli!(s, indices, pauli_idx)
+end
+
+applynoise!(s::AbstractStabilizer, noise::DepolarizationNoise, i::Int) = applynoise!(s, noise, (i,))
+applynoise!(s::AbstractStabilizer, noise::DepolarizationNoise, i::Int, j::Int) = applynoise!(s, noise, (i, j))
+
+"""
+$TYPEDEF
+
+An operator that applies the given `noise` model to the qubits at the selected `indices`.
+"""
 struct NoiseOp{N, Q} <: AbstractNoiseOp where {N, Q}
     noise::N #<:AbstractNoise
     indices::NTuple{Q, Int}
@@ -80,24 +147,36 @@ end
 
 NoiseOp(noise, indices::AbstractVector{Int}) = NoiseOp(noise, tuple(indices...))
 
-"""A convenient constructor for various types of Pauli errors,
+"""
+    PauliError(qubits, p)
+
+A convenient constructor for various types of Pauli errors,
 that can be used as circuit gates in simulations.
-Returns more specific types when necessary."""
+Returns more specific types when necessary.
+"""
 function PauliError end
 
-""""Construct a gate operation that applies an unbiased Pauli error on qubit `q` with probability `p`."""
+"""
+    PauliError(q::Int, p)
+
+Construct a gate operation that applies an unbiased Pauli error on qubit `q` with probability `p`.
+"""
 function PauliError(q::Int,p)
     NoiseOp(PauliNoise(p), [q])
 end
 
-""""Construct a gate operation that applies an unbiased Pauli error on all `qubits`, each with independent probability `p`."""
+"""
+    PauliError(qubits, p)
+
+Construct a gate operation that applies an unbiased Pauli error on all `qubits`, each with independent probability `p`.
+"""
 function PauliError(qubits,p)
     NoiseOp(PauliNoise(p), qubits)
 end
 
 """"Construct a gate operation that applies a biased Pauli error on  qubit `q` with independent probabilities `px`, `py`, `pz`.
 Note that the probability of any error occurring is `px+py+pz`. Because of this, `PauliError(1, p)` is equivalent to `PauliError(1,p/3,p/3,p/3)`.
-Similarly, if one wanted to exclude Z errors from `PauliError(1,p/3,p/3,p/3)` while mainting the same rate of X errors, one could write
+Similarly, if one wanted to exclude Z errors from `PauliError(1,p/3,p/3,p/3)` while maintaining the same rate of X errors, one could write
 `PauliError(1, p*2/3, 0, 0)` (in the sense that Y errors can be interpreted as an X and a Z happening at the same time)."""
 function PauliError(q::Int, px, py, pz)
     NoiseOp(PauliNoise(px,py,pz), (q,))
@@ -105,18 +184,26 @@ end
 
 """"Construct a gate operation that applies a biased Pauli error on all `qubits` independently, each with  probabilities `px`, `py`, `pz`.
 Note that the probability of any error occurring is `px+py+pz`. Because of this, `PauliError(1, p)` is equivalent to `PauliError(1,p/3,p/3,p/3)`.
-Similarly, if one wanted to exclude Z errors from `PauliError(1,p/3,p/3,p/3)` while mainting the same rate of X errors, one could write
+Similarly, if one wanted to exclude Z errors from `PauliError(1,p/3,p/3,p/3)` while maintaining the same rate of X errors, one could write
 `PauliError(1, p*2/3, 0, 0)` (in the sense that Y errors can be interpreted as an X and a Z happening at the same time)."""
 function PauliError(qubits, px, py, pz)
     NoiseOp(PauliNoise(px,py,pz), qubits)
 end
 
-"""An operator that applies the given `noise` model to all qubits."""
+"""
+$TYPEDEF
+
+An operator that applies the given `noise` model to all qubits.
+"""
 struct NoiseOpAll <: AbstractNoiseOp
     noise::AbstractNoise
 end
 
-"""A gate consisting of the given `noise` applied after the given perfect Clifford `gate`."""
+"""
+$TYPEDEF
+
+A gate consisting of the given `noise` applied after the given perfect Clifford `gate`.
+"""
 struct NoisyGate <: AbstractNoiseOp
     gate::AbstractOperation
     noise::AbstractNoise
@@ -176,6 +263,31 @@ function applynoise_branches(s::AbstractStabilizer,noise::UnbiasedUncorrelatedNo
         end
     end
     results
+end
+
+function applynoise_branches(s::AbstractStabilizer, noise::DepolarizationNoise, indices::Base.AbstractVecOrTuple; max_order=1)
+    n = length(indices)
+
+    if n == 1
+        return applynoise_branches(s, UnbiasedUncorrelatedNoise(3noise.p / 4), indices; max_order=max_order)
+    end
+
+    pauli_count = 4^n
+    pauli_prob = noise.p / pauli_count
+
+    results = [(copy(s), 1 - noise.p + pauli_prob, 0)]
+
+    if max_order >= 1
+        for pauli_idx in 1:pauli_count-1
+            order = count(!iszero, digits(pauli_idx, base=4, pad=n))
+            order <= max_order || continue
+            new_state = copy(s)
+            _apply_depolarization_pauli!(new_state, indices, pauli_idx)
+            push!(results, (new_state, pauli_prob, order))
+        end
+    end
+
+    return results
 end
 
 @generated function _applynoise_branches_unbiased_uncorrelated(::Val{order},s,error_indices,results,error_prob) where {order}

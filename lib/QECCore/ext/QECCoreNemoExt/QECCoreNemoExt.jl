@@ -4,14 +4,14 @@ using QECCore
 using DocStringExtensions
 
 import Nemo
-import Nemo: GF, matrix, rank, transpose, finite_field, GF, polynomial_ring, evaluate,
-    FqFieldElem, FqPolyRingElem, degree, is_irreducible, gcd, derivative, matrix, inv,
-    is_zero, coeff, is_monic, one
-
-import QECCore: code_k, parity_matrix_x, parity_matrix_z, parity_matrix, generator_polynomial
+import Nemo: GF, gen, matrix, rank, transpose, polynomial_ring, evaluate, FqFieldElem,
+    FqPolyRingElem, degree, is_irreducible, gcd, derivative, inv, coeff, is_monic, one,
+    minpoly, lcm, is_zero, finite_field
+import QECCore: AbstractPolynomialCode, BCH, code_k, code_n, generator_polynomial,
+    parity_matrix, parity_matrix_x, parity_matrix_z, random_Goppa_code
 
 import Random
-import Random: MersenneTwister
+import Random: MersenneTwister, GLOBAL_RNG, AbstractRNG, rand
 
 function QECCore.code_k(c::AbstractCSSCode)
     n = code_n(c)
@@ -29,6 +29,7 @@ function QECCore.code_k(c::AbstractCECC)
     return n - rank_H
 end
 
+include("bch.jl")
 include("goppa.jl")
 
 end # module

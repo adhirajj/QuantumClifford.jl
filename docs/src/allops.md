@@ -65,7 +65,14 @@ td > code {
 |` ├─ NoiseOp                            `|❌ |  ?| [`applynoise!`](@ref)  |
 |` ├─ NoiseOpAll                         `|❌ |  ?| [`applynoise!`](@ref)  |
 |` ├─ NoisyGate                          `|❌ |  ?| [`applynoise!`](@ref)  |
-|` └─ Reset                              `|✔️ |kn²| [`reset_qubits!`](@ref)|
+|` ├─ Reset                              `|✔️ |kn²| [`reset_qubits!`](@ref)|
+|` │                                     `|  |   |                        |
+|` ├─ AbstractNonCliffordOperator        `|  |   |                        |
+|` │   ├─ sT                             `|✔️ |exp|                        |
+|` │   └─ sCCZ                           `|✔️ |exp|                        |
+|` └─ AbstractPauliChannel               `|  |   |                        |
+|`     ├─ PauliChannel                   `|✔️ |exp|                        |
+|`     └─ UnitaryPauliChannel            `|✔️ |exp|                        |
 
 ## Details of Operations Supported by [`apply!`](@ref)
 
@@ -77,7 +84,6 @@ Predefined unitary gates are available, like [`sCNOT`](@ref), [`sHadamard`](@ref
 
 ```@example 1
 using QuantumClifford # hide
-using QuantumClifford.Experimental.NoisyCircuits # hide
 using Quantikz # hide
 [sCNOT(2,4),sHadamard(2),sCPHASE(1,3),sSWAP(2,4)]
 ```
@@ -89,7 +95,6 @@ They can be specified by giving a Clifford operator tableaux and the indices on 
 
 ```@example 1
 using QuantumClifford # hide
-using QuantumClifford.Experimental.NoisyCircuits # hide
 using Quantikz # hide
 SparseGate(tCNOT, [2,4])
 ```
@@ -152,3 +157,13 @@ Reset(new_state, qubit_indices)
 ```
 
 It can be done anywhere in a circuit, not just at the beginning.
+
+### Non-Clifford Gates
+
+The gates [`sT`](@ref) (T gate, π/8 phase rotation) and [`sCCZ`](@ref) (controlled-controlled-Z) are non-Clifford gates. They work with [`PureGeneralizedStabilizer`](@ref) states and are simulated via [`apply!`](@ref) and [`mctrajectory!`](@ref) as usual or directly with [`emtrajectories`](@ref), which performs end-of-circuit Z-basis measurements using the sum-over-Cliffords decomposition.
+
+### Pauli Channels
+
+[`UnitaryPauliChannel`](@ref) and [`PauliChannel`](@ref) represent non-Clifford channels as weighted sums of Pauli operators. They work with [`GeneralizedStabilizer`](@ref) states via [`apply!`](@ref), [`mctrajectory!`](@ref), and [`expect`](@ref).
+
+Predefined channels include [`pcT`](@ref) (the T gate as a Pauli channel), [`pcPhase`](@ref)`(ϕ)` (arbitrary phase rotation), and [`pcRx`](@ref)`(θ)` (X rotation).

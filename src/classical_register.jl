@@ -1,4 +1,8 @@
-"""A register, representing the state of a computer including both a tableaux and an array of classical bits (e.g. for storing measurement results)"""
+"""
+$TYPEDEF
+
+A register, representing the state of a computer including both a tableaux and an array of classical bits (e.g. for storing measurement results)
+"""
 struct Register{T<:Tableau} <: AbstractQCState # TODO simplify type parameters (remove nesting)
     stab::MixedDestabilizer{T}
     bits::Vector{Bool}
@@ -9,6 +13,13 @@ Register(s::Register) = s
 Register(s,bits) = Register(MixedDestabilizer(s), bits)
 Register(s) = Register(s, Bool[])
 Register(s::MixedDestabilizer,nbits::Int) = Register(s, falses(nbits))
+
+Base.one(::Type{<:Register}, n::Integer; basis=:Z) =
+    Register(one(MixedDestabilizer, n; basis=basis))
+Base.one(::Type{<:Register}, n::Integer, nbits::Integer; basis=:Z) =
+    Register(one(MixedDestabilizer, n; basis=basis), nbits)
+Base.one(r::Register; basis=:Z) =
+    one(Register, nqubits(r), length(bitview(r)); basis=basis)
 
 Base.copy(r::Register) = Register(copy(r.stab),copy(r.bits))
 Base.:(==)(l::Register,r::Register) = l.stab==r.stab && l.bits==r.bits
@@ -25,18 +36,27 @@ function bitview end
 bitview(s::AbstractStabilizer) = ()
 bitview(r::Register) = r.bits
 
-"""Only the quantum part of the state (excluding classical bits)"""
+"""
+    quantumstate
+
+Only the quantum part of the state (excluding classical bits).
+"""
 function quantumstate end
 quantumstate(s::AbstractStabilizer) = s
 quantumstate(r::Register) = r.stab
 
 tab(r::Register) = tab(quantumstate(r))
 
-tensor(regs::Register...) = Register(tensor(quantumstate.(regs)...), [bit for r in regs for bit in r.bits])
-tensor(args::Union{Register, AbstractStabilizer}...) = tensor(Register.(args)...)
+tensor(reg::Register, regs::Register...) = Register(tensor(quantumstate.((reg, regs...))...), [bit for r in (reg, regs...) for bit in r.bits])
+tensor(arg::Union{Register, AbstractStabilizer}, args::Union{Register, AbstractStabilizer}...) = tensor(Register.((arg, args...))...)
 
-function apply!(r::Register, op, args...; kwargs...)
-    apply!(quantumstate(r), op, args...; kwargs...)
+function apply!(r::Register, operation; kwargs...)
+    apply!(quantumstate(r), operation; kwargs...)
+    r
+end
+
+function apply!(r::Register, indices::Base.AbstractVecOrTuple{Int}, operation; kwargs...)
+    apply!(quantumstate(r), indices, operation; kwargs...)
     r
 end
 
@@ -168,7 +188,7 @@ end
 
 
 
-#helper dispatch functions for the AbstractResetMeasurement applybranches 
+#helper dispatch functions for the AbstractResetMeasurement applybranches
 _reset_mappings(::Type{sMRZ}) = (sX, projectZ!)
 _reset_mappings(::Type{sMRX}) = (sZ, projectX!)
 _reset_mappings(::Type{sMRY}) = (sZ, projectY!)

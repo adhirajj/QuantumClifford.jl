@@ -1,4 +1,6 @@
 """
+    QuantumClifford
+
 A module for using the Stabilizer formalism and simulating Clifford circuits.
 """
 module QuantumClifford
@@ -7,19 +9,18 @@ module QuantumClifford
 
 # TODO Significant performance improvements: many operations do not need phase=true if the Pauli operations commute
 
-import LinearAlgebra
-using LinearAlgebra: inv, mul!, rank, Adjoint, dot, tr
-import DataStructures
-using DataStructures: DefaultDict, Accumulator
+using LinearAlgebra: LinearAlgebra, inv, mul!, rank, Adjoint, dot, tr
+using DataStructures: DataStructures, DefaultDict, Accumulator
 using Combinatorics: combinations
 using Base.Cartesian
+
 using DocStringExtensions
 
 import QuantumInterface: tensor, ⊗, tensor_pow,
     nqubits, expect, project!, reset_qubits!, traceout!, ptrace,
     apply!, projectX!, projectY!, projectZ!,
     embed, permutesystems,
-    entanglement_entropy
+    entanglement_entropy, fidelity
 
 export
     @P_str, PauliOperator, ⊗, I, X, Y, Z,
@@ -39,11 +40,11 @@ export
     canonicalize!, canonicalize_rref!, canonicalize_gott!,
     # Linear Algebra
     tensor, tensor_pow,
-    logdot, expect,
+    logdot, expect, fidelity,
     apply!, apply_inv!, apply_right!,
     permutesystems, permutesystems!,
     # Low Level Function Interface
-    generate!, project!, reset_qubits!, traceout!,
+    generate!, project!, reset_qubits!, traceout!, ptrace,
     projectX!, projectY!, projectZ!,
     projectrand!, projectXrand!, projectYrand!, projectZrand!,
     puttableau!, embed,
@@ -61,9 +62,11 @@ export
     # Misc Ops
     SparseGate,
     sMX, sMY, sMZ, PauliMeasurement, Reset, sMRX, sMRY, sMRZ,
-    BellMeasurement, ClassicalXOR,
+    BellMeasurement, NoisyBellMeasurement, ClassicalXOR,
     VerifyOp,
     Register,
+    # Misc gates
+    IndexedDecisionGate, ConditionalGate,
     # Enumeration and Randoms
     enumerate_single_qubit_gates, random_clifford1,
     enumerate_cliffords, symplecticGS, clifford_cardinality, enumerate_phases,
@@ -72,10 +75,11 @@ export
     random_stabilizer, random_destabilizer, random_clifford,
     random_brickwork_clifford_circuit, random_all_to_all_clifford_circuit,
     # Noise
-    applynoise!, UnbiasedUncorrelatedNoise, NoiseOp, NoiseOpAll, NoisyGate,
+    applynoise!, UnbiasedUncorrelatedNoise, DepolarizationNoise, NoiseOp, NoiseOpAll, NoisyGate,
     PauliNoise, PauliError,
     # Pauli frames
     PauliFrame, pftrajectories, pfmeasurements,
+    measurements,
     # Useful States
     bell, ghz, maximally_mixed,
     single_z, single_x, single_y,
@@ -91,8 +95,15 @@ export
     mctrajectory!, mctrajectories, applywstatus!,
     # petrajectories
     petrajectories, applybranches,
-    # nonclifford
-    GeneralizedStabilizer, UnitaryPauliChannel, PauliChannel, pcT, pcPhase,
+    # nonclifford ops
+    pcT, pcPhase, pcRx,
+    sT, sCCZ,
+    isclifford,
+    # nonclifford density matrix and Pauli Channels
+    GeneralizedStabilizer, UnitaryPauliChannel, PauliChannel,
+    # nonclifford pure states
+    PureGeneralizedStabilizer,
+    emtrajectories,
     # makie plotting -- defined only when extension is loaded
     stabilizerplot, stabilizerplot_axis,
     # sum types
@@ -101,41 +112,8 @@ export
     # to_cpu, to_gpu
 
 
-const BIG_INT_MINUS_ONE = Ref{BigInt}()
-const BIG_INT_TWO = Ref{BigInt}()
-const BIG_INT_FOUR = Ref{BigInt}()
-
-function __init__()
-    BIG_INT_MINUS_ONE[] = BigInt(-1)
-    BIG_INT_TWO[] = BigInt(2)
-    BIG_INT_FOUR[] = BigInt(4)
-
-    # Register error hint for the `project!` method for GeneralizedStabilizer
-    if isdefined(Base.Experimental, :register_error_hint)
-        Base.Experimental.register_error_hint(MethodError) do io, exc, argtypes, kwargs
-            if exc.f === project! && argtypes[1] <: GeneralizedStabilizer
-                print(io, """
-                \nThe method `project!` is not appropriate for use with`GeneralizedStabilizer`.
-                You probably are looking for `projectrand!`.
-                `project!` in this library is a low-level "linear algebra" method to verify
-                whether a measurement operator commutes with a set of stabilizers, and to
-                potentially simplify the tableau and provide the index of the anticommuting
-                term in that tableau. This linear algebra operation is not defined for
-                `GeneralStabilizer` as there is no single tableau to provide an index into.""")
-            elseif exc.f === ECC.distance && length(argtypes)==1
-                print(io,"""
-                \nThe distance for this code is not in our database. Consider using the MIP-based method:
-                `import JuMP, HiGHS; distance(code, DistanceMIPAlgorithm(solver=HiGHS))` or another MIP solver""")
-            elseif exc.f === ECC.distance && length(argtypes)==2 && argtypes[2]===ECC.DistanceMIPAlgorithm
-                print(io,"""\nPlease first import `JuMP` to make MIP-based distance calculation available.""")
-            end
-        end
-    end
-end
-
+include("init.jl")
 include("throws.jl")
-
-const NoZeroQubit = ArgumentError("Qubit indices have to be larger than zero, but you are attempting to create a gate acting on a qubit with a non-positive index. Ensure indexing always starts from 1.")
 
 # Predefined constants representing the permitted phases encoded
 # in the low bits of UInt8.
@@ -155,6 +133,7 @@ include("macrotools.jl")
 
 abstract type AbstractOperation end
 abstract type AbstractCliffordOperator <: AbstractOperation end
+abstract type AbstractNonCliffordOperator <: AbstractOperation end
 
 include("pauli_operator.jl")
 
@@ -162,7 +141,10 @@ include("pauli_operator.jl")
 # Generic Tableaux
 ##############################
 
-"""Internal Tableau type for storing a list of Pauli operators in a compact form.
+"""
+$TYPEDEF
+
+Internal Tableau type for storing a list of Pauli operators in a compact form.
 No special semantic meaning is attached to this type, it is just a convenient way to store a list of Pauli operators.
 E.g. it is not used to represent a stabilizer state, or a stabilizer group, or a Clifford circuit."""
 struct Tableau{
@@ -175,6 +157,9 @@ end
 
 function Tableau(paulis::Base.AbstractVecOrTuple{PauliOperator})
     r = length(paulis)
+    if r == 0
+        return Tableau(zeros(UInt8, 0), 0, zeros(UInt8, 0, 0))
+    end
     n = nqubits(paulis[1])
     P = eltype(paulis[1].phase)
     XZ = eltype(paulis[1].xz)
@@ -309,6 +294,8 @@ abstract type AbstractQCState end # This could include classical bits
 abstract type AbstractStabilizer <: AbstractQCState end # This includes only qubits in stabilizer states
 
 """
+$TYPEDEF
+
 Stabilizer, i.e. a list of commuting multi-qubit Hermitian Pauli operators.
 
 Instances can be created with the `S` custom string macro or
@@ -455,7 +442,10 @@ end
 
 Base.hash(s::T, h::UInt) where {T<:AbstractStabilizer} = hash(T, hash(tab(s), h))
 
-"""Extract the underlying tableau structure.
+"""
+    tab(::AbstractStabilizer)
+
+Extract the underlying tableau structure.
 
 ```jldoctest
 julia> s = S"X"
@@ -490,6 +480,8 @@ tab(t::Tableau) = t
 ##############################
 
 """
+$TYPEDEF
+
 A tableau representation of a pure stabilizer state. The tableau tracks the
 destabilizers as well, for efficient projections.
 
@@ -552,6 +544,8 @@ Base.copy(d::Destabilizer) = Destabilizer(copy(tab(d)))
 ##############################
 
 """
+$TYPEDEF
+
 A slight improvement of the [`Stabilizer`](@ref) data structure that enables
 more naturally and completely the treatment of mixed states, in particular when
 the [`project!`](@ref) function is used.
@@ -580,6 +574,8 @@ Base.copy(ms::MixedStabilizer) = MixedStabilizer(copy(tab(ms)), rank(ms))
 ##############################
 
 """
+$TYPEDEF
+
 A tableau representation for mixed stabilizer states that keeps track of the
 destabilizers in order to provide efficient projection operations.
 
@@ -597,6 +593,13 @@ column permutation in the preparation of a `MixedDestabilizer` so that qubits ar
 The boolean keyword arguments `undoperm` and `reportperm` can be used to control this behavior
 and to report the permutations explicitly.
 
+Occasionally one might want specific destabilizer operators for a given tableau, **without** canonicalizing the tableau.
+E.g. if a Pauli frame correction is to be applied after purification or teleportation,
+the correction has to be done by applying the destabilizer corresponding to a specific stabilizer operator of a given tableau.
+Directly using `MixedDestabilizer` will first canonicalize the tableau, which would change the rows of the tableau,
+leading to a consistent set of destabilizer operators, but not the specific ones corresponding to the original pre-canonicalization tableau.
+The `backtrack=true` keyword argument can be undo canonicalization and restore the original rows, but this time also with the corresponding destabilizers.
+
 See also: [`stabilizerview`](@ref), [`destabilizerview`](@ref), [`logicalxview`](@ref), [`logicalzview`](@ref)
 """
 mutable struct MixedDestabilizer{T<:Tableau} <: AbstractStabilizer
@@ -605,9 +608,14 @@ mutable struct MixedDestabilizer{T<:Tableau} <: AbstractStabilizer
 end
 
 # Added a lot of type assertions to help Julia infer types
-function MixedDestabilizer(stab::Stabilizer{T}; undoperm=true, reportperm=false) where {T}
+function MixedDestabilizer(stab::Stabilizer{T}; undoperm=true, reportperm=false, backtrack=false) where {T}
     rows,n = size(stab)
-    stab, r, s, permx, permz = canonicalize_gott!(copy(stab))
+    canonops = CanonOp[]
+    if backtrack
+        stab, r, s, permx, permz, canonops = canonicalize_gott!(copy(stab), backtrack=true)
+    else
+        stab, r, s, permx, permz = canonicalize_gott!(copy(stab))
+    end
     t = zero(T, n*2, n)
     vstab = @view tab(stab)[1:r+s] # this view is necessary for cases of tableaux with redundant rows
     t[n+1:n+r+s] = vstab # The Stabilizer part of the tableau
@@ -642,12 +650,17 @@ function MixedDestabilizer(stab::Stabilizer{T}; undoperm=true, reportperm=false)
     end
     if undoperm
         t = t[:,invperm(permx[permz])]
-        return MixedDestabilizer(t, r+s)
+    end
+    returnstate = MixedDestabilizer(t, r+s)
+    if backtrack
+        for canonop in reverse(canonops)
+            canonop(returnstate)
+        end
     end
     if reportperm
-        return (MixedDestabilizer(t, r+s)::MixedDestabilizer{T}, r, permx, permz)
+        return returnstate, r, permx, permz
     else
-        return MixedDestabilizer(t, r+s)::MixedDestabilizer{T}
+        return returnstate
     end
 end
 
@@ -680,26 +693,50 @@ Base.copy(d::MixedDestabilizer) = MixedDestabilizer(copy(tab(d)),rank(d))
 # Subtableau views
 ##############################
 
-"""A view of the subtableau corresponding to the stabilizer. See also [`tab`](@ref), [`destabilizerview`](@ref), [`logicalxview`](@ref), [`logicalzview`](@ref)"""
+"""
+    stabilizerview(::Stabilizer)
+
+A view of the subtableau corresponding to the stabilizer. See also [`tab`](@ref), [`destabilizerview`](@ref), [`logicalxview`](@ref), [`logicalzview`](@ref)
+"""
 @inline stabilizerview(s::Stabilizer) = s
 @inline stabilizerview(s::Destabilizer) = Stabilizer(@view tab(s)[end÷2+1:end])
 @inline stabilizerview(s::MixedStabilizer) = Stabilizer(@view tab(s)[1:rank(s)])
 @inline stabilizerview(s::MixedDestabilizer) = Stabilizer(@view tab(s)[end÷2+1:end÷2+rank(s)])
 
-"""A view of the subtableau corresponding to the destabilizer. See also [`tab`](@ref), [`stabilizerview`](@ref), [`logicalxview`](@ref), [`logicalzview`](@ref)"""
+"""
+    destabilizerview(::Destabilizer)
+
+A view of the subtableau corresponding to the destabilizer. See also [`tab`](@ref), [`stabilizerview`](@ref), [`logicalxview`](@ref), [`logicalzview`](@ref)
+"""
 @inline destabilizerview(s::Destabilizer) = Stabilizer(@view tab(s)[1:end÷2])
 @inline destabilizerview(s::MixedDestabilizer) = Stabilizer(@view tab(s)[1:rank(s)])
 
-"""A view of the subtableau corresponding to the logical X operators. See also [`tab`](@ref), [`stabilizerview`](@ref), [`destabilizerview`](@ref), [`logicalzview`](@ref)"""
+"""
+    logicalxview(::MixedDestabilizer)
+
+A view of the subtableau corresponding to the logical X operators. See also [`tab`](@ref), [`stabilizerview`](@ref), [`destabilizerview`](@ref), [`logicalzview`](@ref)
+"""
 @inline logicalxview(s::MixedDestabilizer) = Stabilizer(@view tab(s)[rank(s)+1:end÷2])
-"""A view of the subtableau corresponding to the logical Z operators. See also [`tab`](@ref), [`stabilizerview`](@ref), [`destabilizerview`](@ref), [`logicalxview`](@ref)"""
+"""
+    logicalzview(::MixedDestabilizer)
+
+A view of the subtableau corresponding to the logical Z operators. See also [`tab`](@ref), [`stabilizerview`](@ref), [`destabilizerview`](@ref), [`logicalxview`](@ref)
+"""
 @inline logicalzview(s::MixedDestabilizer) = Stabilizer(@view tab(s)[end÷2+rank(s)+1:end])
 
-"""The number of qubits of a given state."""
+"""
+    nqubits(::AbstractStabilizer)
+
+The number of qubits of a given state.
+"""
 @inline nqubits(s::AbstractStabilizer) = nqubits(tab(s))
 @inline nqubits(t::Tableau) = t.nqubits
 
-"""The phases of a given tableau. It is a view, i.e. if you modify this array, the original tableau caries these changes."""
+"""
+    phases(::Tableau)
+
+The phases of a given tableau. It is a view, i.e. if you modify this array, the original tableau caries these changes.
+"""
 @inline phases(t::Tableau) = t.phases
 @inline phases(s::AbstractStabilizer) = phases(tab(stabilizerview(s)))
 
@@ -708,6 +745,8 @@ Base.copy(d::MixedDestabilizer) = MixedDestabilizer(copy(tab(d)),rank(d))
 ##############################
 
 """
+    prodphase
+
 Get the phase of the product of two Pauli operators.
 
 Phase is encoded as F(4) in the low qubits of an UInt8.
@@ -774,6 +813,8 @@ end
 @inline prodphase(l::Stabilizer,r::Stabilizer,i,j) = prodphase(tab(l),tab(r),i,j)
 
 """
+    comm
+
 Check whether two operators commute.
 
 `0x0` if they commute, `0x1` if they anticommute.
@@ -807,6 +848,11 @@ end
 end
 
 @inline function comm(l::PauliOperator, r::Tableau, i::Int)::UInt8
+    # Guard against xzs word-count mismatches: when the tableau's physical word
+    # count per row exceeds what nqubits requires (e.g. after _remove_rowcol!
+    # without compaction), the Z-half offset in the generic comm() would be wrong.
+    @boundscheck length(l.xz) == size(r.xzs, 1) || throw(DimensionMismatch(
+        lazy"comm(PauliOperator, Tableau, i): operator xz length $(length(l.xz)) ≠ tableau xzs row count $(size(r.xzs, 1))"))
     comm(l.xz,(@view r.xzs[:,i]))
 end
 
@@ -1010,6 +1056,8 @@ end
 check_allrowscommute(stabilizer::Stabilizer)=check_allrowscommute(tab(stabilizer))
 
 """
+    vcat(::Vararg{Tableau})
+
 Vertically concatenates tableaux.
 
 ```jldoctest
@@ -1032,6 +1080,8 @@ end
 Base.vcat(stabs::Stabilizer{T}...) where {T} = Stabilizer(vcat((tab(s) for s in stabs)...))
 
 """
+    hcat(::Vararg{Tableau})
+
 Horizontally concatenates tableaux.
 
 ```jldoctest
@@ -1070,11 +1120,16 @@ Base.hcat(stabs::Stabilizer{T}...) where {T} = Stabilizer(hcat((tab(s) for s in 
 ##############################
 
 """
-    apply!
+    apply!(state, operation; phases=true)
+    apply!(state, indices, operation; phases=true)
 
-Apply any quantum operation to a stabilizer state, including unitary Clifford 
-operations, Pauli measurements, and noise. 
-May result in a random/stochastic result (e.g. with measurements or noise)."""
+Apply any quantum operation to a stabilizer state, including unitary Clifford
+operations, Pauli measurements, and noise.
+May result in a random/stochastic result (e.g. with measurements or noise).
+
+When applying an operation to selected subsystems, pass the subsystem `indices`
+before the `operation`.
+"""
 function apply! end
 
 function Base.:(*)(p::AbstractCliffordOperator, s::AbstractStabilizer; phases::Bool=true)
@@ -1084,13 +1139,13 @@ end
 function apply!(stab::AbstractStabilizer, op::AbstractCliffordOperator; phases::Bool=true)
     @valbooldispatch _apply!(stab,op; phases=Val(phases)) phases
 end
-function apply!(stab::AbstractStabilizer, op::AbstractCliffordOperator, indices; phases::Bool=true)
+function apply!(stab::AbstractStabilizer, indices::Base.AbstractVecOrTuple{Int}, op::AbstractCliffordOperator; phases::Bool=true)
     @valbooldispatch _apply!(stab,op,indices; phases=Val(phases)) phases
 end
 
 # TODO no need to track phases outside of stabview
 function _apply!(stab::AbstractStabilizer, p::PauliOperator; phases::Val{B}=Val(true)) where B
-    nqubits(stab)==nqubits(p) || throw(DimensionMismatch("The tableau and the Pauli operator need to act on the same number of qubits. Consider specifying an array of indices as a third argument to the `apply!` function to avoid this error."))
+    nqubits(stab)==nqubits(p) || throw(DimensionMismatch("The tableau and the Pauli operator need to act on the same number of qubits. Consider calling `apply!(state, indices, operation)` to apply the operation to selected subsystems."))
     s = tab(stab)
     B || return stab
     for i in eachindex(s)
@@ -1115,24 +1170,30 @@ end
 
 
 """
-    apply_inv!
-    
+    apply_inv!(state, operation; phases=true)
+    apply_inv!(state, indices, operation; phases=true)
+
 Apply the inverse of any quantum operation to a stabilizer state.
+
+When applying an inverse operation to selected subsystems, pass the subsystem
+`indices` before the `operation`. The legacy order
+`apply_inv!(state, operation, indices)` is deprecated.
 """
 function apply_inv! end
 
 function apply_inv!(stab::AbstractStabilizer, op::AbstractCliffordOperator; phases::Bool=true)
     @valbooldispatch _apply_inv!(stab,op; phases=Val(phases)) phases
 end
-function apply_inv!(stab::AbstractStabilizer, op::AbstractCliffordOperator, indices; phases::Bool=true)
+function apply_inv!(stab::AbstractStabilizer, indices::Base.AbstractVecOrTuple{Int}, op::AbstractCliffordOperator; phases::Bool=true)
     @valbooldispatch _apply_inv!(stab,op,indices; phases=Val(phases)) phases
 end
+@deprecate apply_inv!(stab::AbstractStabilizer, op::AbstractCliffordOperator, indices; phases::Bool=true) apply_inv!(stab, indices, op; phases=phases)
 
 function _apply_inv!(stab::AbstractStabilizer, p::PauliOperator; phases::Val{B}=Val(true)) where B
-    apply!(stab,p; phases=phases)
+    _apply!(stab,p; phases=phases)
 end
 function _apply_inv!(stab::AbstractStabilizer, p::PauliOperator, indices; phases::Val{B}=Val(true)) where B
-    apply!(stab,p,indices; phases=phases)
+    _apply!(stab,p,indices; phases=phases)
 end
 
 ##############################
@@ -1149,7 +1210,11 @@ Base.convert(::Type{<:MixedDestabilizer{T}}, x::Union{Destabilizer{T}, MixedStab
 # Helpers for binary codes
 ##############################
 
-"""The F(2,2) matrix of a given tableau, represented as the concatenation of two binary matrices, one for X and one for Z."""
+"""
+    stab_to_gf2(::Tableau)
+
+The F(2,2) matrix of a given tableau, represented as the concatenation of two binary matrices, one for X and one for Z.
+"""
 function stab_to_gf2(s::Tableau)
     r, n = size(s)
     H = zeros(Bool,r,2n)
@@ -1432,6 +1497,7 @@ include("mctrajectory.jl")
 include("petrajectory.jl")
 include("misc_ops.jl")
 include("classical_register.jl")
+include("misc_gates.jl")
 include("noise.jl")
 include("affectedqubits.jl")
 include("pauli_frames.jl")
@@ -1440,20 +1506,29 @@ include("enumeration.jl")
 include("randoms.jl")
 include("useful_states.jl")
 #
-include("experimental/Experimental.jl")
-#
-include("./graphs/graphs.jl")
+include("graphs/graphs.jl")
+using .GraphSim
 #
 include("entanglement.jl")
 #
+include("isclifford.jl")
+include("symbolic_noncliffords.jl")
+#
 include("tableau_show.jl")
 include("sumtypes.jl")
-include("precompiles.jl")
+#
 include("ecc/ECC.jl")
-include("nonclifford.jl")
+#
+include("lowrank/PauliChannelNonClifford.jl")
+include("lowrank/PureNonClifford.jl")
+using .PauliChannelNonClifford
+using .PureNonClifford
+#
 include("grouptableaux.jl")
 include("plotting_extensions.jl")
 #
 include("gpu_adapters.jl")
-
+#
+include("precompiles.jl")
+include("precompile_statements.jl")
 end #module

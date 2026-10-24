@@ -1,5 +1,6 @@
 @testitem "CirculantBivariateBicycle" begin
-    @static if !Sys.iswindows() && Sys.ARCH == :x86_64 && VERSION >= v"1.11"
+    @static if get(ENV, "QUANTUMSAVORY_DOWNGRADE_TEST", "") != "true" &&
+               !Sys.iswindows() && Sys.ARCH == :x86_64 && VERSION >= v"1.11"
         using QECCore
         using QECCore.LinearAlgebra
         using QuantumClifford
@@ -84,7 +85,7 @@
             )
         ]
             @testset "$(case.name): l=$(case.l), m=$(case.m)" for case in test_cases
-                c = GeneralizedCirculantBivariateBicycle(case.l, case.m, case.A, case.B)
+                c = BivariateBicycleViaCirculantMat(case.l, case.m, case.A, case.B)
                 stab = parity_checks(c)
                 n, k = code_n(c), code_k(c)
                 nₛ, kₛ = code_n(stab), code_k(stab)
@@ -160,7 +161,7 @@
             )
         ]
             @testset "$(case.name): a=$(case.l), b=$(case.m)" for case in test_cases
-                c = GeneralizedCirculantBivariateBicycle(case.l, case.m, case.A, case.B)
+                c = BivariateBicycleViaCirculantMat(case.l, case.m, case.A, case.B)
                 stab = parity_checks(c)
                 n, k = code_n(c), code_k(c)
                 nₛ, kₛ = code_n(stab), code_k(stab)
@@ -283,7 +284,7 @@
 
         ]
             @testset "$(case.name): l=$(case.l), m=$(case.m)" for case in test_cases
-                c = GeneralizedCirculantBivariateBicycle(case.l, case.m, case.A, case.B)
+                c = BivariateBicycleViaCirculantMat(case.l, case.m, case.A, case.B)
                 stab = parity_checks(c)
                 n, k = code_n(c), code_k(c)
                 nₛ, kₛ = code_n(stab), code_k(stab)
@@ -313,7 +314,7 @@
             l, m = 8, 8
             A = [(:x,2), (:y,1), (:y,3), (:y,4)]
             B = [(:y,2), (:x,1), (:x,3), (:x,4)]
-            c = GeneralizedCirculantBivariateBicycle(l, m, A, B)
+            c = BivariateBicycleViaCirculantMat(l, m, A, B)
             stab = parity_checks(c)
             n, k = code_n(c), code_k(c)
             nₛ, kₛ = code_n(stab), code_k(stab)

@@ -6,7 +6,7 @@ using QuantumClifford.ECC: check_repr_commutation_relation, check_repr_regular_l
 using InteractiveUtils
 using SparseArrays
 
-import Nemo: GF
+import Nemo: GF, Native
 import LinearAlgebra
 import Hecke: group_algebra, abelian_group, gens, quo, one, small_group, polynomial_ring, GF, matrix, quo
 
@@ -44,19 +44,19 @@ LP118 = [LPCode(base_matrix, l .- base_matrix', l) for (l, base_matrix) in B118]
 
 # generalized bicyle codes from (A1) and (A2) Appendix B of [panteleev2021degenerate](@cite).
 test_gb_codes = [
-    generalized_bicycle_codes([0, 15, 20, 28, 66], [0, 58, 59, 100, 121], 127), # (A1) [[254, 28, 14≤d≤20]]
-    generalized_bicycle_codes([0, 1, 14, 16, 22], [0, 3, 13, 20, 42], 63), # (A2) [[126, 28, 8]]
+    generalized_bicycle_code_as_2bga([0, 15, 20, 28, 66], [0, 58, 59, 100, 121], 127), # (A1) [[254, 28, 14≤d≤20]]
+    generalized_bicycle_code_as_2bga([0, 1, 14, 16, 22], [0, 3, 13, 20, 42], 63), # (A2) [[126, 28, 8]]
 ]
 
 test_hcubic_codes = [
-    haah_cubic_codes([0, 15, 20, 28, 66], [0, 58, 59, 100, 121], 3),
-    haah_cubic_codes(8), # (D) [[1024, 30, 13 ≤ d ≤ 32]] Appendix B of [panteleev2021degenerate](@cite).
+    Haah_cubic_code_as_2bga([0, 15, 20, 28, 66], [0, 58, 59, 100, 121], 3),
+    Haah_cubic_code_as_2bga(8), # (D) [[1024, 30, 13 ≤ d ≤ 32]] Appendix B of [panteleev2021degenerate](@cite).
 ]
 
 # honeycomb color codes from [eberhardt2024logical](@cite).
 test_honeycomb_color_codes = [
-    honeycomb_color_codes(6 , 6), honeycomb_color_codes(9 , 6),
-    honeycomb_color_codes(12, 6), honeycomb_color_codes(12, 9),
+    honeycomb_color_code_as_2bga(6 , 6), honeycomb_color_code_as_2bga(9 , 6),
+    honeycomb_color_code_as_2bga(12, 6), honeycomb_color_code_as_2bga(12, 9),
 ]
 
 # Lifted product codes using non-commutative algebras
@@ -67,21 +67,21 @@ GA = group_algebra(GF(2), G)
 r, s  = gens(GA);
 A = 1 + r
 B = 1 + s + r^6 + s^3*r + s*r^7 + s^3*r^5
-nonabel1 = two_block_group_algebra_codes(A,B)
+nonabel1 = two_block_group_algebra_code(A,B)
 
 G = small_group(48,10)
 GA = group_algebra(GF(2), G)
 r, s  = gens(GA);
 A = 1 + s*r^2
 B = 1 + r + s^3 + s^4 + s^2*r^5 + s^4*r^6
-nonabel2 = two_block_group_algebra_codes(A,B)
+nonabel2 = two_block_group_algebra_code(A,B)
 
 G = small_group(40,8)
 GA = group_algebra(GF(2), G)
 r, s  = gens(GA);
 A = 1 + s*r^5 + r^5 + s*r^6
 B = 1 + s^2 + r + s^2*r^3
-nonabel3 = two_block_group_algebra_codes(A,B)
+nonabel3 = two_block_group_algebra_code(A,B)
 
 test_nonabelian_codes = [nonabel1, nonabel2, nonabel3]
 
@@ -109,7 +109,7 @@ GA = group_algebra(GF(2), abelian_group([l*m]))
 𝜋 = gens(GA)[1]
 A = 𝜋^2 + 𝜋^5  + 𝜋^44
 B = 𝜋^8 + 𝜋^14 + 𝜋^47
-coprimeBB1 = two_block_group_algebra_codes(A, B)
+coprimeBB1 = two_block_group_algebra_code(A, B)
 
 # [[126,12,10]]
 l=7; m=9
@@ -117,7 +117,7 @@ GA = group_algebra(GF(2), abelian_group([l*m]))
 𝜋 = gens(GA)[1]
 A = 1   + 𝜋    + 𝜋^58
 B = 𝜋^3 + 𝜋^16 + 𝜋^44
-coprimeBB2 = two_block_group_algebra_codes(A, B)
+coprimeBB2 = two_block_group_algebra_code(A, B)
 
 test_coprimeBB_codes = [coprimeBB1, coprimeBB2]
 
@@ -129,7 +129,7 @@ x, y = gens(GA)
 z = x*y
 A = x^3 + y^7
 B = x + y^5
-weight4mbb = two_block_group_algebra_codes(A, B)
+weight4mbb = two_block_group_algebra_code(A, B)
 
 # Weight-5 [96, 4, 8]] MBB code
 l=8; m=6
@@ -138,7 +138,7 @@ x, y = gens(GA)
 z = x*y
 A = x^6 + x^3
 B = z^5 + x^5 + y
-weight5mbb = two_block_group_algebra_codes(A, B)
+weight5mbb = two_block_group_algebra_code(A, B)
 
 # Weight-6 [[48, 4, 6]] MBB code
 l=4; m=6
@@ -147,7 +147,7 @@ x, y = gens(GA)
 z = x*y
 A = x^3 + y^5
 B = x + z^5 + y^5 + y^2
-weight6mbb = two_block_group_algebra_codes(A, B)
+weight6mbb = two_block_group_algebra_code(A, B)
 
 # Weight-7 [[30, 4, 5]] MBB code
 l=5; m=3
@@ -156,7 +156,7 @@ x, y = gens(GA)
 z = x*y
 A = x^4 + x^2
 B = x + x^2 + y + z^2 + z^3
-weight7mbb = two_block_group_algebra_codes(A, B)
+weight7mbb = two_block_group_algebra_code(A, B)
 
 test_mbb_codes = [weight4mbb, weight5mbb, weight6mbb, weight7mbb]
 
@@ -167,7 +167,7 @@ GA = group_algebra(GF(2), abelian_group([l, m]))
 x, y = gens(GA)
 A = x^3 + y + y^2
 B = y^3 + x + x^2
-bb1 = two_block_group_algebra_codes(A,B)
+bb1 = two_block_group_algebra_code(A,B)
 
 # A [[90, 8, 10]] code from Table 3 of [bravyi2024high](@cite).
 l=15; m=3
@@ -175,7 +175,7 @@ GA = group_algebra(GF(2), abelian_group([l, m]))
 x, y = gens(GA)
 A = x^9 + y   + y^2
 B = 1   + x^2 + x^7
-bb2 = two_block_group_algebra_codes(A,B)
+bb2 = two_block_group_algebra_code(A,B)
 
 # A [[360, 12, ≤ 24]]  code from Table 3 of [bravyi2024high](@cite).
 l=30; m=6
@@ -183,7 +183,7 @@ GA = group_algebra(GF(2), abelian_group([l, m]))
 x, y = gens(GA)
 A = x^9 + y    + y^2
 B = y^3 + x^25 + x^26
-bb3 = two_block_group_algebra_codes(A,B)
+bb3 = two_block_group_algebra_code(A,B)
 
 test_bb_codes = [bb1, bb2, bb3]
 
@@ -225,17 +225,17 @@ R, x = polynomial_ring(GF(2), :x)
 l_gb₁ = 6
 a_gb₁ = 1 + x^4
 b_gb₁ = 1 + x + x^2 + x^4
-c_gb₁ = GeneralizedBicycleCode(a_gb₁, b_gb₁, l_gb₁)
+c_gb₁ = GeneralizedBicycle(a_gb₁, b_gb₁, l_gb₁)
 p_gb₁ = one(R)
 l_gb₂ = 9
 a_gb₂ = 1 + x^2
 b_gb₂ = 1 + x^5
-c_gb₂ = GeneralizedBicycleCode(a_gb₂, b_gb₂, l_gb₂)
+c_gb₂ = GeneralizedBicycle(a_gb₂, b_gb₂, l_gb₂)
 p_gb₂ = one(R)
 l_gb₃ = 10
 a_gb₃ = 1 + x
 b_gb₃ = 1 + x^6
-c_gb₃ = GeneralizedBicycleCode(a_gb₃, a_gb₃, l_gb₃)
+c_gb₃ = GeneralizedBicycle(a_gb₃, a_gb₃, l_gb₃)
 p_gb₃ = one(R) + x
 
 # Add some codes that require Oscar, hence do not work on Windows
@@ -292,16 +292,16 @@ const code_instance_args = Dict(
     :Triangular488 => [(3,), (5,), (7,), (9,), (11,)],
     :Triangular666 => [(3,), (5,), (7,), (9,), (11,)],
     :DelfosseReichardt => [(2,1,3), (2,2,4), (4,3,5), (4,3,6)],
-    :DelfosseReichardtRepCode => [(4,), (6,), (8,), (10,)],
+    :DelfosseReichardtRep => [(4,), (6,), (8,), (10,)],
     :DelfosseReichardt823 => [(2,), (3,), (4,), (5,)],
     :QuantumTannerGraphProduct => [(H1, H2),(H2, H2), (H1, H1), (H2, H1)],
     :CyclicQuantumTannerGraphProduct => [(2,), (3,), (4,)],
     :LaCross => [(5,h₂,true), (6,h₂,true), (8,h₂,true), (7,h₃,false), (7,h₃,true), (9,h₃,true), (9,h₄,true), (10,h₄,true), (12,h₄,true)],
     :TillichZemor => [(4,3,3), (5,4,4), (6,5,5), (7,6,6)],
-    :GeneralizedCirculantBivariateBicycle => [(l1, m1, A1, B1), (l2, m2, A2,B2), (l3, m3, A3, B3), (l4, m4, A4, B4), (l5, m5, A5, B5)],
-    :GeneralizedHyperGraphProductCode => [(A_ghp1, b_ghp1, l_ghp1), (A_ghp2, b_ghp2, l_ghp2)],
-    :GeneralizedBicycleCode => [(a_gb₁, b_gb₁, l_gb₁), (a_gb₂, b_gb₂, l_gb₂), (a_gb₃ ,b_gb₃, l_gb₃)],
-    :ExtendedGeneralizedBicycleCode => [(c_gb₁, 2, p_gb₁), (c_gb₂, 3, p_gb₂), (c_gb₃, 4, p_gb₃)]
+    :BivariateBicycleViaCirculantMat => [(l1, m1, A1, B1), (l2, m2, A2,B2), (l3, m3, A3, B3), (l4, m4, A4, B4), (l5, m5, A5, B5)],
+    :GeneralizedHyperGraphProduct => [(A_ghp1, b_ghp1, l_ghp1), (A_ghp2, b_ghp2, l_ghp2)],
+    :GeneralizedBicycle => [(a_gb₁, b_gb₁, l_gb₁), (a_gb₂, b_gb₂, l_gb₂), (a_gb₃ ,b_gb₃, l_gb₃)],
+    :ExtendedGeneralizedBicycle => [(c_gb₁, 2, p_gb₁), (c_gb₂, 3, p_gb₂), (c_gb₃, 4, p_gb₃)]
 )
 
 @static if !Sys.iswindows() && Sys.ARCH == :x86_64 && VERSION >= v"1.11"
@@ -433,8 +433,8 @@ const code_instance_args = Dict(
 
     # 3D Homological product code from [Quintavalle_2021](@cite)
     μ = 2; wc = 3; wr = 4
-    c = GallagerLDPC(μ, wc, wr)
-    H₃ = matrix(GF(2), parity_matrix(c))
+    c = random_Gallager_ldpc(μ, wc, wr)
+    H₃ = matrix(GF(2), c)
 
     # 3D Homological product code from [Quintavalle_2021](@cite)
     δ₄ = matrix(GF(2), parity_matrix(RepCode(3)))
@@ -443,7 +443,7 @@ const code_instance_args = Dict(
     # [[241, 1, 9]] from Table I of https://arxiv.org/pdf/1805.09271
     δ₁ = [1 1 0;
           0 1 1]
-    
+
     # [[486, 6, 9]] from Table I of https://arxiv.org/pdf/1805.09271
     δ₂ = [1 1 0;
           0 1 1;
@@ -453,33 +453,33 @@ const code_instance_args = Dict(
 
     # [[36, 3, 3]] from Table III
     F₂ = GF(2)
-    ℓ₁, m₁, p₁ = 3, 2, 2
+    l₁, m₁, p₁ = 3, 2, 2
     R, (x, y, z) = polynomial_ring(F₂, [:x, :y, :z])
-    I = ideal(R, [x^ℓ₁ - 1, y^m₁ - 1, z^p₁ - 1])
+    I = ideal(R, [x^l₁ - 1, y^m₁ - 1, z^p₁ - 1])
     S, _ = quo(R, I)
     A₁ = S(1 + x*y*z)
     B₁ = S(1 + x^2*z)
     C₁ = S(1 + x)
 
     # [[48, 3, 4]] from Table III
-    ℓ₂, m₂, p₂ = 4, 2, 2
-    I = ideal(R, [x^ℓ₂ - 1, y^m₂ - 1, z^p₂ - 1])
+    l₂, m₂, p₂ = 4, 2, 2
+    I = ideal(R, [x^l₂ - 1, y^m₂ - 1, z^p₂ - 1])
     S, _ = quo(R, I)
     A₂ = S(1 + x)
     B₂ = S(1 + x*z)
     C₂ = S(1 + x*y)
 
     # [[54, 3, 4]] from Table III
-    ℓ₃, m₃, p₃ = 3, 3, 2
-    I = ideal(R, [x^ℓ₃ - 1, y^m₃ - 1, z^p₃ - 1])
+    l₃, m₃, p₃ = 3, 3, 2
+    I = ideal(R, [x^l₃ - 1, y^m₃ - 1, z^p₃ - 1])
     S, _ = quo(R, I)
     A₃ = S(1 + y*z)
     B₃ = S(1 + x*z)
     C₃ = S(1 + x*y*z)
 
     # [[108, 6, 2]] from Table IV
-    ℓ₄, m₄, p₄ = 4, 3, 3
-    I = ideal(R, [x^ℓ₄ - 1, y^m₄ - 1, z^p₄ - 1])
+    l₄, m₄, p₄ = 4, 3, 3
+    I = ideal(R, [x^l₄ - 1, y^m₄ - 1, z^p₄ - 1])
     S, _ = quo(R, I)
     A₄ = S((1 + x^2)*(1 + x*z))
     B₄ = S(1 + x^2*y^2)
@@ -487,7 +487,7 @@ const code_instance_args = Dict(
 
     # Generalized Toric Codes from [liang2025generalizedtoriccodestwisted](@cite)
     # [[12, 4, 2]] from Table I of [liang2025generalizedtoriccodestwisted](@cite)
-    R, (x,y) = laurent_polynomial_ring(GF(2), [:x, :y])
+    R, (x,y) = laurent_polynomial_ring(Native.GF(2), [:x, :y])
     f₁ = 1 + x + x*y
     g₁ = 1 + y + x*y
     α1₁ = (0, 3)
@@ -523,13 +523,95 @@ const code_instance_args = Dict(
     α1₆ = (0,  3)
     α2₆ = (19, 1)
 
+    # Bivariate Bicycle codes using polynomial quotient ring
+    # [[72, 12, 6]]
+    l_bb₁=6; m_bb₁=6
+    R_bb₁, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_bb₁ = ideal(R_bb₁, [x^l-1, y^m-1])
+    S_bb₁, _ = quo(R_bb₁, I_bb₁)
+    A_bb₁ = S_bb₁(x^3 + y + y^2)
+    B_bb₁ = S_bb₁(y^3 + x + x^2)
+
+    # [[90, 8, 10]]
+    l_bb₂=15; m_bb₂=3
+    R_bb₂, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_bb₂ = ideal(R_bb₂, [x^l-1, y^m-1])
+    S_bb₂, _ = quo(R_bb₂, I_bb₂)
+    A_bb₂ = S_bb₂(x^9 + y   + y^2)
+    B_bb₂ = S_bb₂(1   + x^2 + x^7)
+
+    # [[108, 8, 10]]
+    l_bb₃=9; m_bb₃=6
+    R_bb₃, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_bb₃ = ideal(R_bb₃, [x^l-1, y^m-1])
+    S_bb₃, _ = quo(R_bb₃, I_bb₃)
+    A_bb₃ = S_bb₃(x^3 + y + y^2)
+    B_bb₃ = S_bb₃(y^3 + x + x^2)
+
+    # [[54, 8, 6]]
+    l_bb₄=3; m_bb₄=9
+    R_bb₄, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_bb₄ = ideal(R_bb₄, [x^l-1, y^m-1])
+    S_bb₄, _ = quo(R_bb₄, I_bb₄)
+    A_bb₄ = S_bb₄(1   + y^2 + y^4)
+    B_bb₄ = S_bb₄(y^3 + x   + x^2)
+
+    # [[98, 6, 12]]
+    l_bb₅=7; m_bb₅=7
+    R_bb₅, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_bb₅ = ideal(R_bb₅, [x^l-1, y^m-1])
+    S_bb₅, _ = quo(R_bb₅, I_bb₅)
+    A_bb₅ = S_bb₅(x^3 + y^5 + y^6)
+    B_bb₅ = S_bb₅(y^2 + x^3 + x^5)
+
+    # Multivariate Multicycle Codes
+    # t = 2; Bivariate Bicycle codes
+    # [[72, 12, 6]]
+    l_mm₁ =6; m_mm₁ = 6
+    R_mm₁, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_mm₁ = ideal(R_mm₁, [x^l_mm₁-1, y^m_mm₁-1])
+    S_mm₁, _ = quo(R_mm₁, I_mm₁)
+    A_mm₁ = S_mm₁(x^3 + y + y^2)
+    B_mm₁ = S_mm₁(y^3 + x + x^2)
+
+    # [[90, 8, 10]]
+    l_mm₂ =15; m_mm₂ = 3
+    R_mm₂, (x, y) = polynomial_ring(Native.GF(2), [:x, :y])
+    I_mm₂ = ideal(R_mm₂, [x^l_mm₂-1, y^m_mm₂-1])
+    S_mm₂, _ = quo(R_mm₂, I_mm₂)
+    A_mm₂ = S_mm₂(x^9 + y   + y^2)
+    B_mm₂ = S_mm₂(1   + x^2 + x^7)
+
+    # t = 3; Trivariate Tricycle codes
+    # [[60, 3, 4]]
+    ℓ_mm₃, m_mm₃, p_mm₃ = 5, 2, 2
+    F2_mm₃ = GF(2)
+    R_mm₃, (x, y, z) = polynomial_ring(F2_mm₃, [:x, :y, :z])
+    I_mm₃ = ideal(R_mm₃, [x^ℓ_mm₃ - 1, y^m_mm₃ - 1, z^p_mm₃ - 1])
+    S_mm₃, _ = quo(R_mm₃, I_mm₃)
+    A_mm₃ = S_mm₃(1 + x*z)
+    B_mm₃ = S_mm₃(1 + x*y)
+    C_mm₃ = S_mm₃(1 + x*y*z)
+
+    # [[90, 3, 5]]
+    ℓ_mm₄, m_mm₄, p_mm₄ = 5, 3, 2
+    F2_mm₄ = GF(2)
+    R_mm₄, (x, y, z) = polynomial_ring(F2_mm₄, [:x, :y, :z])
+    I_mm₄ = ideal(R_mm₄, [x^ℓ_mm₄ - 1, y^m_mm₄ - 1, z^p_mm₄ - 1])
+    S_mm₄, _ = quo(R_mm₄, I_mm₄)
+    A_mm₄ = S_mm₄(1 + x)
+    B_mm₄ = S_mm₄(1 + x*y)
+    C_mm₄ = S_mm₄(1 + x^2*y^2*z)
+
     oscar_code_instance_args = Dict(
-        :DDimensionalSurfaceCode => [(2, 3), (3, 2), (3, 3), (4, 2)],
-        :DDimensionalToricCode => [(2, 3), (3, 2), (3, 3), (4, 2)],
-        :GeneralizedToricCode => [(f₁, g₁, α1₁, α2₁), (f₂, g₂, α1₂, α2₂), (f₃, g₃, α1₃, α2₃), (f₄, g₄, α1₄, α2₄), (f₅, g₅, α1₅, α2₅), (f₆, g₆, α1₆, α2₆)],
-        :HomologicalProductCode => [([H₁, transpose(H₁)], l₁), ([H₂, transpose(H₂)], l₂), ([H₃, transpose(H₃)],), ([δ₄, δ₄, δ₄],)],
-        :DoubleHomologicalProductCode => [(δ₁,), (δ₂,)],
-        :TrivariateTricycleCode => [(ℓ₁, m₁, p₁, A₁, B₁, C₁), (ℓ₂, m₂, p₂, A₂, B₂, C₂), (ℓ₃, m₃, p₃, A₃, B₃, C₃), (ℓ₄, m₄, p₄, A₄, B₄, C₄)]
+        :DDimensionalSurface => [(2, 3), (3, 2), (3, 3), (4, 2)],
+        :DDimensionalToric => [(2, 3), (3, 2), (3, 3), (4, 2)],
+        :GeneralizedToric => [(f₁, g₁, α1₁, α2₁), (f₂, g₂, α1₂, α2₂), (f₃, g₃, α1₃, α2₃), (f₄, g₄, α1₄, α2₄), (f₅, g₅, α1₅, α2₅), (f₆, g₆, α1₆, α2₆)],
+        :HomologicalProduct => [([H₁, transpose(H₁)], l₁), ([H₂, transpose(H₂)], l₂), ([H₃, transpose(H₃)],), ([δ₄, δ₄, δ₄],)],
+        :DoubleHomologicalProduct => [(δ₁,), (δ₂,)],
+        :TrivariateTricycle => [(l₁, m₁, p₁, A₁, B₁, C₁), (l₂, m₂, p₂, A₂, B₂, C₂), (l₃, m₃, p₃, A₃, B₃, C₃), (l₄, m₄, p₄, A₄, B₄, C₄)],
+        :BivariateBicycleViaPoly => [(l_bb₁, m_bb₁, A_bb₁, B_bb₁), (l_bb₂, m_bb₂, A_bb₂, B_bb₂), (l_bb₃, m_bb₃, A_bb₃, B_bb₃), (l_bb₄, m_bb₄, A_bb₄, B_bb₄), (l_bb₅, m_bb₅, A_bb₅, B_bb₅)],
+        :MultivariateMulticycle =>[([l_mm₁,m_mm₁], [A_mm₁, B_mm₁]), ([l_mm₂,m_mm₂], [A_mm₂, B_mm₂]), ([ℓ_mm₃, m_mm₃, p_mm₃], [A_mm₃, B_mm₃, C_mm₃]), ([ℓ_mm₄, m_mm₄, p_mm₄], [A_mm₄, B_mm₄, C_mm₄])]
     )
     merge!(code_instance_args, oscar_code_instance_args)
   end

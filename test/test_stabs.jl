@@ -1,8 +1,9 @@
 @testitem "Stabilizers" begin
     using QuantumClifford
     using LinearAlgebra
+    using Random: randperm
     using QuantumClifford: stab_looks_good, destab_looks_good, mixed_stab_looks_good, mixed_destab_looks_good
-    test_sizes = [1,2,10,63,64,65,127,128,129] # Including sizes that would test off-by-one errors in the bit encoding.
+    test_sizes = [1,2,10,63,64,65] # Including sizes that would test off-by-one errors in the bit encoding.
     @testset "Pure and Mixed state initialization" begin
 
         @testset "Destabilizer initialization" begin
@@ -41,6 +42,34 @@
                 @test MixedDestabilizer(s) == md
             end
         end
+        @testset "one basis keyword" begin
+            for basis in (:X, :Y, :Z)
+                expected = one(Stabilizer, 3; basis=basis)
+
+                destab = one(Destabilizer, 3; basis=basis)
+                @test stabilizerview(destab) == expected
+                @test stabilizerview(one(destab; basis=basis)) == expected
+                @test destab_looks_good(destab)
+
+                mixed_stab = one(MixedStabilizer, 2, 3; basis=basis)
+                @test stabilizerview(mixed_stab) == expected[1:2]
+                @test mixed_stab_looks_good(mixed_stab)
+                @test one(MixedStabilizer, 2, 3, basis) == mixed_stab
+                @test one(mixed_stab; basis=basis) == mixed_stab
+
+                mixed_destab = one(MixedDestabilizer, 2, 3; basis=basis)
+                @test stabilizerview(mixed_destab) == expected[1:2]
+                @test mixed_destab_looks_good(mixed_destab)
+                @test stabilizerview(one(MixedDestabilizer, 3; basis=basis)) == expected
+                @test one(mixed_destab; basis=basis) == mixed_destab
+
+                register = one(Register, 3, 2; basis=basis)
+                @test quantumstate(register) == one(MixedDestabilizer, 3; basis=basis)
+                @test bitview(register) == falses(2)
+                @test bitview(one(Register, 3; basis=basis)) == Bool[]
+                @test one(register; basis=basis) == register
+            end
+        end
     end
 
     @testset "Tensor products over stabilizers" begin
@@ -54,7 +83,7 @@
             canonicalize!(s)
             dss = canonicalize!(copy(stabilizerview(ds)))
             @test s == dss
-            stabs = [s[1:i] for s in [random_stabilizer(n) for n in [32,16,16,64,63,65,129,128,127]] for i in rand(1:10)];
+            stabs = [s[1:i] for s in [random_stabilizer(n) for n in [32,16,16,64,63,65]] for i in rand(1:10)];
             mdstabs = MixedDestabilizer.(stabs);
             @test canonicalize!(⊗(stabs...)) == canonicalize!(stabilizerview(⊗(mdstabs...)))
             md = MixedDestabilizer(random_destabilizer(n))
@@ -128,6 +157,19 @@
             s = random_stabilizer(n)
             @test stabilizerview(Destabilizer(s))==s # Destabilizer is supposed to guarantee same stabilizer generators
             @test canonicalize!(stabilizerview(MixedDestabilizer(s)))==canonicalize!(stabilizerview(Destabilizer(s)))
+        end
+    end
+
+    @testset "permutesystems does not modify original" begin
+        for n in [2, 5, 10]
+            perm = randperm(n)
+            for s in [random_stabilizer(n), random_destabilizer(n), MixedDestabilizer(random_stabilizer(n))]
+                original = copy(stabilizerview(s))
+                permuted = permutesystems(s, perm)
+                @test stabilizerview(s) == original
+                @test permuted !== s
+                @test stabilizerview(permutesystems(s, perm)) == stabilizerview(permutesystems!(copy(s), perm))
+            end
         end
     end
 

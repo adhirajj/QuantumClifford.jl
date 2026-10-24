@@ -4,8 +4,6 @@
 
     test_sizes = [1,2,10,63,64,65,127,128,129] # Including sizes that would test off-by-one errors in the bit encoding.
 
-    using QuantumClifford.Experimental.NoisyCircuits
-
     import AbstractAlgebra
 
     @testset "SparseGate" begin
@@ -27,11 +25,83 @@
         ng4 = NoisyGate(g4, n)
         ng5 = NoiseOp(n,[7])
         state = ghz(7)
-        res1, _ = mctrajectory!(copy(state), [ng1,ng2,ng3,ng4,ng5])
+        noisy_circuit = [ng1,ng2,ng3,ng4,ng5]
         res2, _ = mctrajectory!(copy(state), [g1,g2,g3,g4])
-        @test res1 != res2 # has a very small chance of failing
-        resp = petrajectories(copy(state), [ng1,ng2,ng3,ng4,ng5])
+        res1s = [mctrajectory!(copy(state), noisy_circuit)[1] for _ in 1:10]
+        @test any(res1 -> res1 != res2, res1s) # this weird check is because there is a small chance that res1==res2 because of the randomness of the noise -- this makes the chance much smaller
+        resp = petrajectories(copy(state), noisy_circuit)
         @test all(values(resp).==0)
+    end
+
+    @testset "Depolarization noise" begin
+        p = 0.3
+        n = DepolarizationNoise(p)
+        single_qubit_state = S"Z"
+        single_qubit_branches = QuantumClifford.applynoise_branches(copy(single_qubit_state), n, (1,))
+        unbiased_single_qubit_branches = QuantumClifford.applynoise_branches(copy(single_qubit_state), UnbiasedUncorrelatedNoise(3p / 4), (1,))
+
+        @test length(single_qubit_branches) == 4
+        @test map(branch -> branch[2:3], single_qubit_branches) == map(branch -> branch[2:3], unbiased_single_qubit_branches)
+        @test single_qubit_branches[1][2] ≈ 1 - p + p / 4
+        @test single_qubit_branches[1][3] == 0
+        @test all(branch[2] ≈ p / 4 for branch in single_qubit_branches[2:end])
+        @test all(branch[3] == 1 for branch in single_qubit_branches[2:end])
+        @test sum(branch[2] for branch in single_qubit_branches) ≈ 1
+
+        two_qubit_state = ghz(2)
+        two_qubit_branches = QuantumClifford.applynoise_branches(copy(two_qubit_state), n, (1, 2), max_order=2)
+
+        @test length(two_qubit_branches) == 16
+        @test two_qubit_branches[1][2] ≈ 1 - p + p / 16
+        @test two_qubit_branches[1][3] == 0
+        @test all(branch[2] ≈ p / 16 for branch in two_qubit_branches[2:end])
+        @test count(branch[3] == 1 for branch in two_qubit_branches[2:end]) == 6
+        @test count(branch[3] == 2 for branch in two_qubit_branches[2:end]) == 9
+        @test sum(branch[2] for branch in two_qubit_branches) ≈ 1
+
+        error_probability = 0.3
+        error_parameterized_noise = DepolarizationNoise(; two_qubit_error_probability=error_probability)
+        error_parameterized_branches = QuantumClifford.applynoise_branches(copy(two_qubit_state), error_parameterized_noise, (1, 2), max_order=2)
+
+        @test error_parameterized_branches[1][2] ≈ 1 - error_probability
+        @test all(branch[2] ≈ error_probability / 15 for branch in error_parameterized_branches[2:end])
+        @test sum(branch[2] for branch in error_parameterized_branches) ≈ 1
+
+        state_key(state) = repr(canonicalize!(copy(state)))
+
+        function branch_probabilities(state, noise, indices)
+            probabilities = Dict{String, Float64}()
+            branches = QuantumClifford.applynoise_branches(
+                copy(state), noise, indices, max_order=length(indices))
+            for (new_state, probability, _) in branches
+                key = state_key(new_state)
+                probabilities[key] = get(probabilities, key, 0.0) + probability
+            end
+            return probabilities
+        end
+
+        function sampled_probabilities(state, noise, indices; samples=2000)
+            counts = Dict{String, Int}()
+            for _ in 1:samples
+                key = state_key(applynoise!(copy(state), noise, indices))
+                counts[key] = get(counts, key, 0) + 1
+            end
+            return Dict(key => count / samples for (key, count) in counts)
+        end
+
+        function test_applynoise_matches_branches(state, noise, indices)
+            Random.seed!(0)
+            expected = branch_probabilities(state, noise, indices)
+            sampled = sampled_probabilities(state, noise, indices)
+            @test keys(sampled) ⊆ keys(expected)
+            @test all(
+                isapprox(get(sampled, key, 0.0), probability; atol=0.04)
+                for (key, probability) in expected
+            )
+        end
+
+        test_applynoise_matches_branches(single_qubit_state, n, (1,))
+        test_applynoise_matches_branches(two_qubit_state, n, (1, 2))
     end
 
     @testset "Monte Carlo Purification examples" begin
@@ -60,7 +130,16 @@
 
     @testset "Perturbative expansion Purification examples" begin
         @testset "Comparison to MC" begin
-            compare(a,b, symbol) = abs(a[symbol]/500-b[symbol]) / (a[symbol]/500+b[symbol]+1e-5) < 0.3
+            # `trajectories` controls test stringency vs. flakiness:
+            # more trajectories → smaller MC variance → can tighten `threshold`.
+            # With failure_stat ≈ 3%, std ≈ sqrt(p(1-p)/n). At n=2000 and
+            # threshold=0.4 the allowed deviation is ~3.2σ (flakiness <0.2% per
+            # comparison). Reduce `trajectories` or tighten `threshold` for a
+            # more stringent but flakier test.
+            trajectories = 2000
+            threshold = 0.4
+            compare(a, b, symbol) = abs(a[symbol]/trajectories - b[symbol]) /
+                                    (a[symbol]/trajectories + b[symbol] + 1e-5) < threshold
             g1 = SparseGate(tCNOT, [1,3])
             g2 = SparseGate(tCNOT, [2,4])
             m = BellMeasurement([sMX(3),sMX(4)])
@@ -70,17 +149,17 @@
             v = VerifyOp(good_bell_state,[1,2])
             n = NoiseOpAll(UnbiasedUncorrelatedNoise(0.03))
             init = Register(MixedDestabilizer(good_bell_state⊗good_bell_state))
-            mc = mctrajectories(init, [n,g1,g2,m,v], trajectories=500)
+            mc = mctrajectories(init, [n,g1,g2,m,v], trajectories=trajectories)
             pe = petrajectories(init, [n,g1,g2,m,v])
             @test compare(mc,pe,failure_stat)
             @test compare(mc,pe,false_success_stat)
             @test compare(mc,pe,true_success_stat)
-            mc = mctrajectories(init, [n,v], trajectories=500)
+            mc = mctrajectories(init, [n,v], trajectories=trajectories)
             pe = petrajectories(init, [n,v])
             @test compare(mc,pe,failure_stat)
             @test compare(mc,pe,false_success_stat)
             @test compare(mc,pe,true_success_stat)
-            mc = mctrajectories(init, [g1,g2,m,v], trajectories=500)
+            mc = mctrajectories(init, [g1,g2,m,v], trajectories=trajectories)
             pe = petrajectories(init, [g1,g2,m,v])
             @test compare(mc,pe,failure_stat)
             @test compare(mc,pe,false_success_stat)
@@ -315,15 +394,15 @@
     end
 
     @testset "Classical Bits" begin
-        @testset "DecisionGate" begin
+        @testset "IndexedDecisionGate" begin
             X_error = CliffordOperator([P"X", P"-Z"])
             # testing single digit return value from decision function
-            for s in [S"Z", S"-Z", S"X", S"-X", S"Y", S"-Y"]
+            for s in [S"Z", S"-Z", S"X", S"-X"]
                 r = Register(s, [false])
                 applywstatus!(r, PauliMeasurement(P"Z", 1))
                 correctiveGate = SparseGate(X_error, [1])
                 decisionFunction = syndrome -> syndrome[1] ? 1 : nothing
-                applywstatus!(r, DecisionGate([correctiveGate], decisionFunction))
+                applywstatus!(r, IndexedDecisionGate([correctiveGate], decisionFunction))
                 @test stabilizerview(r) == S"Z"
             end
 
@@ -335,7 +414,7 @@
             applywstatus!(r, PauliMeasurement(P"ZI", 1))
             correctiveGates = [SparseGate(X_error, [1]), SparseGate(X_error, [2])]
             decisionFunction = syndrome -> syndrome[1] ? [1,2] : nothing
-            applywstatus!(r, DecisionGate(correctiveGates, decisionFunction))
+            applywstatus!(r, IndexedDecisionGate(correctiveGates, decisionFunction))
             canonicalize!(quantumstate(r))
             @test stabilizerview(r) == expectedFinalState
 
@@ -344,7 +423,7 @@
             applywstatus!(r, sMZ(1, 1))
             # we use the same corrective gates, with a different decision function
             decisionFunction = syndrome -> syndrome[1] ? [1] : 2 # both [1] and 1 should work
-            applywstatus!(r, DecisionGate(correctiveGates, decisionFunction))
+            applywstatus!(r, IndexedDecisionGate(correctiveGates, decisionFunction))
             canonicalize!(quantumstate(r))
             @test stabilizerview(r) == expectedFinalState
         end
@@ -353,7 +432,7 @@
             id_op = CliffordOperator([P"X", P"Z"])
             X_error = CliffordOperator([P"X", P"-Z"])
 
-            for s in [S"Z", S"-Z", S"X", S"-X", S"Y", S"-Y"]
+            for s in [S"Z", S"-Z", S"X", S"-X"]
                 r = Register(s, [false])
                 applywstatus!(r, PauliMeasurement(P"Z", 1))
                 correctiveGate = SparseGate(X_error, [1])

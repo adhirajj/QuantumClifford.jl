@@ -1,4 +1,6 @@
 """
+    generate!(::PauliOperator, ::Stabilizer)
+
 Generate a Pauli operator by using operators from a given the Stabilizer.
 
 **It assumes the stabilizer is already canonicalized.** It modifies
@@ -453,13 +455,15 @@ function projectX!(s::AbstractStabilizer,qubit::Int;keep_result::Bool=true,phase
 end
 
 """
+    projectZ!(::MixedDestabilizer, ::Int)
+
 Measure a given qubit in the Z basis.
 A faster special-case version of [`project!`](@ref).
 
 See also: [`project!`](@ref), [`projectZrand!`](@ref), [`projectY!`](@ref), [`projectX!`](@ref).
 """
 function projectZ!(d::MixedDestabilizer,qubit::Int;keep_result::Bool=true,phases::Bool=true)
-    @valbooldispatch project_cond!(d,qubit,Val(isX),Val((false,true));keep_result,phases=Val(phases))
+    @valbooldispatch project_cond!(d,qubit,Val(isX),Val((false,true));keep_result,phases=Val(phases)) phases
 end
 
 function projectZ!(s::AbstractStabilizer,qubit::Int;keep_result::Bool=true,phases::Bool=true)
@@ -473,7 +477,7 @@ A faster special-case version of [`project!`](@ref).
 See also: [`project!`](@ref), [`projectYrand!`](@ref), [`projectX!`](@ref), [`projectZ!`](@ref).
 """
 function projectY!(d::MixedDestabilizer,qubit::Int;keep_result::Bool=true,phases::Bool=true)
-    @valbooldispatch project_cond!(d,qubit,Val(isXorZ),Val((true,true));keep_result,phases=Val(phases))
+    @valbooldispatch project_cond!(d,qubit,Val(isXorZ),Val((true,true));keep_result,phases=Val(phases)) phases
 end
 
 function projectY!(s::AbstractStabilizer,qubit::Int;keep_result::Bool=true,phases::Bool=true)
@@ -649,6 +653,8 @@ end
 
 """
 $TYPEDSIGNATURES
+
+Trace out qubits from a mixed stabilizer state.
 """
 function traceout!(s::Union{MixedStabilizer, MixedDestabilizer}, qubits; phases=true, rank=false)
     _,i = canonicalize_rref!(s,qubits;phases=phases)
@@ -689,6 +695,8 @@ end
 
 """
 $TYPEDSIGNATURES
+
+Reset qubits in a mixed stabilizer state.
 """
 function reset_qubits!(s::MixedStabilizer, newstate, qubits; phases=true) # TODO create the necessary interfaces so that Stabilizer and MixedStabilizer share this code
     nqubits(newstate)==length(qubits) || throw(DimensionMismatch("`qubits` and `newstate` have to be of consistent size"))
@@ -705,9 +713,10 @@ end
 
 """
 $TYPEDSIGNATURES
+
+Reset qubits in a mixed destabilizer state.
 """
-function reset_qubits!(s::MixedDestabilizer, newstate::AbstractStabilizer, qubits; phases=true) # TODO this is really inefficient
-    _phases = Val(phases)
+function reset_qubits!(s::MixedDestabilizer, newstate::AbstractStabilizer, qubits; phases::Bool=true) # TODO this is really inefficient
     nqubits(newstate)==length(qubits) || throw(DimensionMismatch("`qubits` and `newstate` have to be of consistent size"))
     length(qubits) <= nqubits(s) || throw(DimensionMismatch("the stabilizer is not big enough to contain the new state"))
     newstatestab = stabilizerview(newstate)
@@ -725,7 +734,7 @@ function reset_qubits!(s::MixedDestabilizer, newstate::AbstractStabilizer, qubit
                 loc = findfirst(i->comm(pauli,destab,i)!=0, 1:r)::Int # `nothing` should not be a possible answer
                 for i in loc+1:r
                     if comm(pauli, destab, i)!=0
-                        mul_left!(s, i, loc; phases=_phases)
+                        @valbooldispatch mul_left!(s, i, loc; phases=Val(phases)) phases
                     end
                 end
                 sv[loc] = pauli
@@ -749,6 +758,126 @@ function expect(p::PauliOperator, s::AbstractStabilizer)
     result === 0x01 && return im
     result === 0x02 && return -1
     result === 0x03 && return -im
+end
+
+"Return the base-two log expectation, or `nothing` when it is zero."
+function _stabilizer_expect_log2(
+    indices::Union{Nothing,Int,Base.AbstractVecOrTuple{Int}},
+    operator_state::MixedDestabilizer,
+    state::MixedDestabilizer,
+)
+    projected_state = copy(state)
+    exponent = rank(operator_state) - nqubits(operator_state)
+    state_qubits = nqubits(state)
+    for generator in stabilizerview(operator_state)
+        projected_generator = isnothing(indices) ? generator :
+            embed(state_qubits, indices, generator)
+        _, _, result = project!(projected_state, projected_generator)
+        if result === nothing
+            exponent -= 1
+        elseif result != 0x00
+            return nothing
+        end
+    end
+    exponent
+end
+
+"""
+    expect(operator_state::MixedDestabilizer, state::MixedDestabilizer)
+    expect(indices::Base.AbstractVecOrTuple{Int},
+           operator_state::MixedDestabilizer,
+           state::MixedDestabilizer)
+    expect(index::Int,
+           operator_state::MixedDestabilizer,
+           state::MixedDestabilizer)
+
+Compute an expectation involving two stabilizer-state density operators.
+
+An ``n``-qubit stabilizer state with rank ``r`` and stabilizer group ``S`` is
+interpreted as the normalized density operator
+
+```math
+\\rho_S = 2^{-n}\\sum_{g\\in S} g = \\frac{P_S}{2^{n-r}},
+```
+
+where ``P_S`` projects onto the common stabilized subspace.
+Returns the Hilbert--Schmidt expectation
+``\\operatorname{Tr}(\\rho_{\\mathrm{operator}}\\rho_{\\mathrm{state}})``. In
+particular, if `operator_state` is pure, this is its projector probability in
+`state`.
+
+The indexed forms embed `operator_state` in a larger system of qubits at `indices`
+and return
+``\\operatorname{Tr}[(\\rho_{\\mathrm{operator}}\\otimes I)\\rho_{\\mathrm{state}}]``.
+The first operator qubit maps to the first index, the second to the second, and
+so on. Indices must be unique, in bounds, and equal in count to the number of
+operator qubits.
+
+# Examples
+
+```jldoctest
+julia> expect(MixedDestabilizer(S"Z"), maximally_mixed(1))
+0.5
+
+julia> expect([1, 3], MixedDestabilizer(bell()), MixedDestabilizer(ghz(3)))
+0.5
+```
+
+See also: [`expect(::PauliOperator, ::AbstractStabilizer)`](@ref),
+[`fidelity`](@ref), [`project!`](@ref).
+"""
+function expect(
+    operator_state::MixedDestabilizer,
+    state::MixedDestabilizer,
+)
+    operator_qubits = nqubits(operator_state)
+    state_qubits = nqubits(state)
+    operator_qubits == state_qubits || throw(DimensionMismatch(
+        lazy"Expected equal qubit counts; got $operator_qubits and $state_qubits.",
+    ))
+    exponent = _stabilizer_expect_log2(nothing, operator_state, state)
+    isnothing(exponent) ? 0.0 : exp2(exponent)
+end
+
+@doc (@doc expect) function expect(
+    indices::Base.AbstractVecOrTuple{Int},
+    operator_state::MixedDestabilizer,
+    state::MixedDestabilizer,
+)
+    operator_qubits = nqubits(operator_state)
+    provided_indices = length(indices)
+    provided_indices == operator_qubits || throw(DimensionMismatch(
+        lazy"Expected $operator_qubits subsystem indices; got $provided_indices.",
+    ))
+    Base.require_one_based_indexing(indices)
+    allunique(indices) || throw(ArgumentError(
+        lazy"Subsystem indices must be unique; got $indices.",
+    ))
+    state_qubits = nqubits(state)
+    all(index -> 1 <= index <= state_qubits, indices) || throw(ArgumentError(
+        lazy"Subsystem indices must lie between 1 and $state_qubits; got $indices.",
+    ))
+
+    exponent = _stabilizer_expect_log2(indices, operator_state, state)
+    isnothing(exponent) ? 0.0 : exp2(exponent)
+end
+
+@doc (@doc expect) function expect(
+    index::Int,
+    operator_state::MixedDestabilizer,
+    state::MixedDestabilizer,
+)
+    operator_qubits = nqubits(operator_state)
+    operator_qubits == 1 || throw(DimensionMismatch(
+        lazy"Expected a one-qubit operator state; got $operator_qubits qubits.",
+    ))
+    state_qubits = nqubits(state)
+    1 <= index <= state_qubits || throw(ArgumentError(
+        lazy"The subsystem index must lie between 1 and $state_qubits; got $index.",
+    ))
+
+    exponent = _stabilizer_expect_log2(index, operator_state, state)
+    isnothing(exponent) ? 0.0 : exp2(exponent)
 end
 
 """Put source tableau in target tableau at given row and column. Assumes target location is zeroed out.""" # TODO implement a getindex setindex interface to this
@@ -788,9 +917,40 @@ function puttableau!(target::Stabilizer{T1}, source::Tableau, row::Int, col::Int
     puttableau!(tab(target), source, row, col; phases)
 end
 
-"""Unexported low-level function that removes a column (by shifting all columns to the right of the target by one step to the left)
+"""
+    _compact_xzs_words(xzs, nqubits)
 
-Because Tableau is not mutable we return a new Tableau with the same (modified) xzs array."""
+Return `xzs` with only the packed word rows needed for `nqubits`.
+
+Packed tableau data stores all X words followed by all Z words. After removing a
+qubit across a word boundary, the old backing array can still contain too many
+word rows. Leaving that oversized layout in place breaks the split point used by
+low-level operations such as `comm`, which can then read stale X words as Z
+words. This helper preserves the no-allocation path when the word count is
+unchanged and allocates a compact matrix only when the word count shrinks.
+"""
+function _compact_xzs_words(xzs::AbstractMatrix{T}, nqubits::Int) where {T<:Unsigned}
+    old_nwords = size(xzs, 1) ÷ 2
+    new_nwords = cld(nqubits, 8 * sizeof(T))
+    new_nwords < old_nwords || return xzs
+
+    compact_xzs = similar(xzs, 2 * new_nwords, size(xzs, 2))
+    if new_nwords > 0
+        @views begin
+            compact_xzs[1:new_nwords, :] .= xzs[1:new_nwords, :]
+            compact_xzs[(new_nwords + 1):(2 * new_nwords), :] .=
+                xzs[(old_nwords + 1):(old_nwords + new_nwords), :]
+        end
+    end
+    compact_xzs
+end
+
+"""Unexported low-level function that removes a column.
+
+Columns to the right of the target are shifted one step left. Because Tableau is
+not mutable we return a new Tableau. The backing xzs array is reused unless the
+removal crosses a packed-word boundary.
+"""
 function remove_column!(s::Tableau{V,M}, col::Int) where {V,T<:Unsigned,M<:AbstractMatrix{T}}
     rows,cols=size(s)
     xzs = s.xzs
@@ -809,7 +969,8 @@ function remove_column!(s::Tableau{V,M}, col::Int) where {V,T<:Unsigned,M<:Abstr
             xzs[end÷2+j,i] = xzs[end÷2+j,i] >> 1
         end
     end
-    Tableau(s.phases, nqubits(s)-1, s.xzs)
+    new_nqubits = nqubits(s) - 1
+    Tableau(s.phases, new_nqubits, _compact_xzs_words(s.xzs, new_nqubits))
 end
 remove_column!(s::Stabilizer, col::Int) = Stabilizer(remove_column!(tab(s),col))
 
@@ -828,7 +989,7 @@ end
 
 """Unexported low-level function that removes a row (by shifting all rows up as necessary)
 
-Because MixedDestabilizer is not mutable we return a new MixedDestabilizer with the same (modified) xzs array.
+Because MixedDestabilizer is not mutable we return a new MixedDestabilizer.
 
 Used on its own, this function will break invariants. Meant to be used with `projectremove!`.
 """
@@ -880,6 +1041,8 @@ end
 
 
 """
+    delete_columns(::Stabilizer, subset)
+
 Return the given stabilizer without all the qubits in the given iterable.
 
 The resulting tableaux is not guaranteed to be valid (to retain its commutation relationships).
@@ -896,4 +1059,29 @@ See also: [`traceout!`](@ref)
 function delete_columns(𝒮::Stabilizer, subset)
     if length(𝒮) == 0 return 𝒮 end
     return 𝒮[:, setdiff(1:nqubits(𝒮), subset)]
+end
+
+function ptrace(s::Stabilizer, to_traceout::Base.AbstractVecOrTuple{Int})
+    n = nqubits(s)
+    to_keep = setdiff(1:n, to_traceout)
+    s = traceout!(copy(s), to_traceout)
+    s[:,to_keep]
+end
+
+function ptrace(s::MixedStabilizer, to_traceout::Base.AbstractVecOrTuple{Int})
+    n = nqubits(s)
+    to_keep = setdiff(1:n, to_traceout)
+    s = traceout!(copy(s), to_traceout)
+    MixedStabilizer(tab(s)[:,to_keep], rank(s))
+end
+
+function ptrace(s::MixedDestabilizer, to_traceout::Base.AbstractVecOrTuple{Int})
+    n = nqubits(s)
+    to_keep = setdiff(1:n, to_traceout)
+    s = traceout!(copy(s), to_traceout)
+    if rank(s) == 0
+        return one(typeof(s), 0, length(to_keep))
+    else
+        return MixedDestabilizer(stabilizerview(s)[:,to_keep]) # TODO this can be faster by avoiding the repeated canonicalization
+    end
 end
